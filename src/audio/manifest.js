@@ -48,274 +48,244 @@
 
 /** @type {Record<string, AudioAsset>} */
 export const AUDIO_MANIFEST = {
-    // The wind bed. Seventeen seconds of it, overlapped by two and a half, so
-    // the bed never lands on a seam the ear can time.
-    //
-    // Unity here, deliberately. How loud the bed actually sits is one number,
-    // `S.ambienceVolume`, and it lives in the settings so the overlay's Ambience
-    // fader is the real control rather than a trim on top of a hidden one. A trim
-    // here as well would mean two places to look and a slider whose number means
-    // nothing on its own.
-    //
-    // The soundscape still rides this voice with speed, but only ever *downward*
-    // from unity — so `S.ambienceVolume` is a ceiling the bed never exceeds.
-    ambience: {
-        url: "audio/ambiance.mp3",
-        bus: "ambience",
-        loop: true,
-        gain: 1.0,
-        trim: 0.2,
-        crossfade: 2.5,
-    },
+ // The wind bed. Seventeen seconds of it, overlapped by two and a half, so
+ // the bed never lands on a seam the ear can time.
+ //
+ // Unity here, deliberately. How loud the bed actually sits is one number,
+ // `S.ambienceVolume`, and it lives in the settings so the overlay's Ambience
+ // fader is the real control rather than a trim on top of a hidden one. A trim
+ // here as well would mean two places to look and a slider whose number means
+ // nothing on its own.
+ //
+ // The soundscape still rides this voice with speed, but only ever *downward*
+ // from unity — so `S.ambienceVolume` is a ceiling the bed never exceeds.
+ ambience: {
+  url: "audio/ambiance.mp3",
+  bus: "ambience",
+  loop: true,
+  gain: 1.0,
+  trim: 0.2,
+  crossfade: 2.5,
+ },
 
-    // The score, under everything, on its own bus and its own fader.
-    //
-    // The gain is not a taste value — it is a measured loudness match to the wind
-    // bed, which is what "at the same level as the ambience" has to mean if it is
-    // to mean anything. EBU R 128 integrated loudness: the bed sits at
-    // -16.8 LUFS and this file at -19.5, so the file comes up 2.7 dB, and the
-    // soundscape then holds the bed at 0.88 of unity while the player is standing
-    // still — so the match is 10^(2.7/20) * 0.88 = 1.20 rather than 1.36.
-    //
-    // Matched at rest on purpose. That is the state the player is in for the first
-    // few seconds after the gate, which is when the two get compared; once they
-    // are moving the bed rises to unity and ends up a decibel over the music,
-    // which is the wind coming up rather than the music going quiet.
-    //
-    // With both files levelled to each other, `S.musicVolume` can default to
-    // exactly `S.ambienceVolume` and equal fader positions mean equal loudness.
-    //
-    // Headroom is not a concern despite the boost: the file's true peak is
-    // -1.7 dBFS, so the source node reaches +1.0, and nothing downstream of it
-    // runs at unity — the music bus sits at 0.34 and the master at 0.8, which
-    // lands the peak near -8 dBFS well before the limiter has an opinion.
-    //
-    // Overlapped rather than natively looped, and by four seconds rather than the
-    // bed's two and a half. The track ends loud and begins quiet, so the join is
-    // a real musical event rather than a seam in a texture, and it needs the long
-    // window to pass as a decay.
-    music: {
-        url: "audio/imperial.mp3",
-        bus: "music",
-        loop: true,
-        gain: 1.20,
-        trim: 0.08,
-        crossfade: 4.0,
-    },
+ // The score, under everything, on its own bus and its own fader.
+ //
+ // The gain is not a taste value — it is a measured loudness match to the wind
+ // bed, which is what "at the same level as the ambience" has to mean if it is
+ // to mean anything. EBU R 128 integrated loudness: the bed sits at
+ // -16.8 LUFS and this file at -19.5, so the file comes up 2.7 dB, and the
+ // soundscape then holds the bed at 0.88 of unity while the player is standing
+ // still — so the match is 10^(2.7/20) * 0.88 = 1.20 rather than 1.36.
+ //
+ // Matched at rest on purpose. That is the state the player is in for the first
+ // few seconds after the gate, which is when the two get compared; once they
+ // are moving the bed rises to unity and ends up a decibel over the music,
+ // which is the wind coming up rather than the music going quiet.
+ //
+ // With both files levelled to each other, `S.musicVolume` can default to
+ // exactly `S.ambienceVolume` and equal fader positions mean equal loudness.
+ //
+ // Headroom is not a concern despite the boost: the file's true peak is
+ // -1.7 dBFS, so the source node reaches +1.0, and nothing downstream of it
+ // runs at unity — the music bus sits at 0.34 and the master at 0.8, which
+ // lands the peak near -8 dBFS well before the limiter has an opinion.
+ //
+ // Overlapped rather than natively looped, and by four seconds rather than the
+ // bed's two and a half. The track ends loud and begins quiet, so the join is
+ // a real musical event rather than a seam in a texture, and it needs the long
+ // window to pass as a decay.
+ music: {
+  url: "audio/imperial.mp3",
+  bus: "music",
+  loop: true,
+  gain: 1.20,
+  trim: 0.08,
+  crossfade: 4.0,
+ },
 
-    // The board on snow, held for as long as the slide is. Natively looped
-    // rather than overlapped: its rate is modulated by speed every frame, which
-    // an overlap schedule cannot follow.
-    slide: {
-        url: "audio/slide-continue.mp3",
-        bus: "sfx",
-        loop: true,
-        gain: 0.85,
-        trim: 0.04,
-    },
+ // The board on snow, held for as long as the slide is. Natively looped
+ // rather than overlapped: its rate is modulated by speed every frame, which
+ // an overlap schedule cannot follow.
+ slide: {
+  url: "audio/slide-continue.mp3",
+  bus: "sfx",
+  loop: true,
+  gain: 0.85,
+  trim: 0.04,
+ },
 
-    // Two carve samples, picked at random per turn with no immediate repeat.
-    turnA: { url: "audio/slide-turn-1.mp3", bus: "sfx", gain: 0.7, minGap: 0.42 },
-    turnB: { url: "audio/slide-turn-2.mp3", bus: "sfx", gain: 0.7, minGap: 0.42 },
+ // Two carve samples, picked at random per turn with no immediate repeat.
+ turnA: { url: "audio/slide-turn-1.mp3", bus: "sfx", gain: 0.7, minGap: 0.42 },
+ turnB: { url: "audio/slide-turn-2.mp3", bus: "sfx", gain: 0.7, minGap: 0.42 },
 
-    // The opening line: Luke, once, as the boot screen fades. Fired from main
-    // right after the unlock gesture, so it is the first thing heard.
-    lukeIntro: { url: "audio/luke-voice-1.mp3", bus: "voice", gain: 1.0 },
+ // The opening line: Luke, once, as the boot screen fades. Fired from main
+ // right after the unlock gesture, so it is the first thing heard.
+ lukeIntro: { url: "audio/luke-voice-1.mp3", bus: "voice", gain: 1.0 },
 
-    // Catching air off a crest at speed. Six takes, drawn from a shuffled bag so
-    // the order is random but no line comes back before the other five have had a
-    // turn. Each carries its own long floor as a backstop under the soundscape's
-    // cooldown — a voice line repeating inside a few seconds is the fastest way to
-    // make a character sound like a soundboard.
-    excited1: { url: "audio/excited-1.mp3", bus: "voice", gain: 0.95, minGap: 20 },
-    excited2: { url: "audio/excited-2.mp3", bus: "voice", gain: 0.95, minGap: 20 },
-    excited3: { url: "audio/excited-3.mp3", bus: "voice", gain: 0.95, minGap: 20 },
-    excited4: { url: "audio/excited-4.mp3", bus: "voice", gain: 0.95, minGap: 20 },
-    excited5: { url: "audio/excited-5.mp3", bus: "voice", gain: 0.95, minGap: 20 },
-    excited6: { url: "audio/excited-6.mp3", bus: "voice", gain: 0.95, minGap: 20 },
+ // Catching air off a crest at speed. Six takes, drawn from a shuffled bag so
+ // the order is random but no line comes back before the other five have had a
+ // turn. Each carries its own long floor as a backstop under the soundscape's
+ // cooldown — a voice line repeating inside a few seconds is the fastest way to
+ // make a character sound like a soundboard.
+ excited1: { url: "audio/excited-1.mp3", bus: "voice", gain: 0.95, minGap: 20 },
+ excited2: { url: "audio/excited-2.mp3", bus: "voice", gain: 0.95, minGap: 20 },
+ excited3: { url: "audio/excited-3.mp3", bus: "voice", gain: 0.95, minGap: 20 },
+ excited4: { url: "audio/excited-4.mp3", bus: "voice", gain: 0.95, minGap: 20 },
+ excited5: { url: "audio/excited-5.mp3", bus: "voice", gain: 0.95, minGap: 20 },
+ excited6: { url: "audio/excited-6.mp3", bus: "voice", gain: 0.95, minGap: 20 },
 
-    // One entry per spell, keyed `spell<n>` so the soundscape can look a cast up
-    // by the number the player pressed. A spell with no entry is simply silent —
-    // `play` no-ops on a key it does not hold — so this table is the whole of
-    // which spells have a voice.
-    //
-    // All of them are `exclusive`, which is load-bearing rather than tidy: nothing
-    // rate-limits how fast a spell can be re-cast — the spell itself just restarts
-    // — so the sound has to restart with it. `effect1` runs five seconds against a
-    // 2.4-second sweep, and without this a player leaning on the key stacks voices
-    // faster than they expire.
-    spell1: { url: "audio/effect1.mp3", bus: "sfx", gain: 0.55, minGap: 0.1, exclusive: true },
-    spell2: { url: "audio/effect2.mp3", bus: "sfx", gain: 0.55, minGap: 0.1, exclusive: true },
-    spell3: { url: "audio/effect3.mp3", bus: "sfx", gain: 0.55, minGap: 0.1, exclusive: true },
-    spell4: { url: "audio/effect4.mp3", bus: "sfx", gain: 0.55, minGap: 0.1, exclusive: true },
-    spell5: { url: "audio/effect5.mp3", bus: "sfx", gain: 0.55, minGap: 0.1, exclusive: true },
+ // One entry per spell, keyed `spell<n>` so the soundscape can look a cast up
+ // by the number the player pressed. A spell with no entry is simply silent —
+ // `play` no-ops on a key it does not hold — so this table is the whole of
+ // which spells have a voice.
+ //
+ // All of them are `exclusive`, which is load-bearing rather than tidy: nothing
+ // rate-limits how fast a spell can be re-cast — the spell itself just restarts
+ // — so the sound has to restart with it. `effect1` runs five seconds against a
+ // 2.4-second sweep, and without this a player leaning on the key stacks voices
+ // faster than they expire.
+ spell1: { url: "audio/effect1.mp3", bus: "sfx", gain: 0.55, minGap: 0.1, exclusive: true },
+ spell2: { url: "audio/effect2.mp3", bus: "sfx", gain: 0.55, minGap: 0.1, exclusive: true },
+ spell3: { url: "audio/effect3.mp3", bus: "sfx", gain: 0.55, minGap: 0.1, exclusive: true },
+ spell4: { url: "audio/effect4.mp3", bus: "sfx", gain: 0.55, minGap: 0.1, exclusive: true },
+ spell5: { url: "audio/effect5.mp3", bus: "sfx", gain: 0.55, minGap: 0.1, exclusive: true },
 
-    // A walker's chin cannon.
-    //
-    // No `exclusive`: two machines firing a second apart are two events, and a
-    // near shot cutting a far one short is exactly what would give the distance
-    // away as fake.
-    //
-    // The floor is very short, and it has to be, because `minGap` is keyed on the
-    // *sample* and not on the machine: a herd of six shares one counter, so any
-    // floor is also a rule about how close together two different walkers may
-    // fire. At 0.05 a sixth of the herd's shots were being dropped outright at
-    // the top of the count slider — and dropped blind to distance, so a far
-    // machine's crack could eat the near one that followed it 40 ms later, which
-    // is the loudest sound in the demo going missing. The paired barrels are
-    // 0.11 s apart (`FIRE_STAGGER`), so anything under that is safe for a burst;
-    // what stopped it going lower before was two copies of one sample landing in
-    // the same frame and comb-filtering. The soundscape now detunes every shot
-    // onto alternating sides of unity, so the two copies are no longer the same
-    // sample and cannot phase against each other — which leaves this purely as a
-    // runaway guard, and a runaway guard wants to be as small as it can be.
-    //
-    // Hot on its own — the file measures -11 LUFS against the spells' -20s — so
-    // the trim here is doing real work rather than expressing a preference.
-    //
-    // There is no footfall entry. The gait *is* detected (see `deriveFootfalls`
-    // in `walkers/walker.js`) and the soundscape already asks for `walkerStep` on
-    // every one, so dropping a sample in here and naming it is the whole of
-    // turning footsteps on. It is deliberately not a synthesised stand-in: a
-    // twenty-two metre machine's footfall is a recording or it is a thud.
-    walkerShot: {
-        url: "audio/at-walker-canon.mp3",
-        bus: "sfx",
-        gain: 0.36,
-        minGap: 0.02,
-    },
+ // A walker's chin cannon.
+ //
+ // No `exclusive`: two machines firing a second apart are two events, and a
+ // near shot cutting a far one short is exactly what would give the distance
+ // away as fake.
+ //
+ // The floor is very short, and it has to be, because `minGap` is keyed on the
+ // *sample* and not on the machine: a herd of six shares one counter, so any
+ // floor is also a rule about how close together two different walkers may
+ // fire. At 0.05 a sixth of the herd's shots were being dropped outright at
+ // the top of the count slider — and dropped blind to distance, so a far
+ // machine's crack could eat the near one that followed it 40 ms later, which
+ // is the loudest sound in the demo going missing. The paired barrels are
+ // 0.11 s apart (`FIRE_STAGGER`), so anything under that is safe for a burst;
+ // what stopped it going lower before was two copies of one sample landing in
+ // the same frame and comb-filtering. The soundscape now detunes every shot
+ // onto alternating sides of unity, so the two copies are no longer the same
+ // sample and cannot phase against each other — which leaves this purely as a
+ // runaway guard, and a runaway guard wants to be as small as it can be.
+ //
+ // Hot on its own — the file measures -11 LUFS against the spells' -20s — so
+ // the trim here is doing real work rather than expressing a preference.
+ //
+ // There is no footfall entry. The gait *is* detected (see `deriveFootfalls`
+ // in `walkers/walker.js`) and the soundscape already asks for `walkerStep` on
+ // every one, so dropping a sample in here and naming it is the whole of
+ // turning footsteps on. It is deliberately not a synthesised stand-in: a
+ // twenty-two metre machine's footfall is a recording or it is a thud.
 
-    // The AT-ST's chin gun — the escort's own voice, snappier and lighter than
-    // the walker cannon above. Same no-`exclusive` reasoning: two scouts firing
-    // are two events, and the soundscape scales the level with distance. Same
-    // floor as the cannon, and for the same reason written out up there — more
-    // urgently here, in fact, since there are five scouts by default against
-    // three walkers and the shared counter is that much busier.
-    atstShot: {
-        url: "audio/at-st-cannon.mp3",
-        bus: "sfx",
-        gain: 0.32,
-        minGap: 0.02,
-    },
 
-    // The speeder's cannons, alternating. Two samples rather than one detuned,
-    // because the pair are audibly different weapons firing and a single sample
-    // pitched about is the fastest way to make a rate-of-fire sound like a loop.
-    speederLaser1: {
-        url: "audio/airspeeder-laser-1.mp3", bus: "sfx", gain: 0.42, minGap: 0.04,
-        needs: "speeder",
-    },
-    speederLaser2: {
-        url: "audio/airspeeder-laser-2.mp3", bus: "sfx", gain: 0.42, minGap: 0.04,
-        needs: "speeder",
-    },
+ // The speeder's cannons, alternating. Two samples rather than one detuned,
+ // because the pair are audibly different weapons firing and a single sample
+ // pitched about is the fastest way to make a rate-of-fire sound like a loop.
+ speederLaser1: {
+  url: "audio/airspeeder-laser-1.mp3", bus: "sfx", gain: 0.42, minGap: 0.04,
+  needs: "speeder",
+ },
+ speederLaser2: {
+  url: "audio/airspeeder-laser-2.mp3", bus: "sfx", gain: 0.42, minGap: 0.04,
+  needs: "speeder",
+ },
 
-    // A craft hitting something — the collision pass's own hits and crashes,
-    // player included, and any speeder going into the snow. Fired at the level
-    // and delay its distance earns, same physics as the cannon. Gated on the
-    // speeder rather than the wingmen now that the player's craft can crash.
-    //
-    // No longer the AI wingman's death, though — that is `speederCrash2` below,
-    // whose recording contains the whole fall rather than one impact.
-    speederCrash: {
-        url: "audio/speeder-explosion.mp3",
-        bus: "sfx",
-        gain: 0.9,
-        minGap: 0.5,
-        needs: "speeder",
-    },
+ // A craft hitting something — the collision pass's own hits and crashes,
+ // player included, and any speeder going into the snow. Fired at the level
+ // and delay its distance earns, same physics as the cannon. Gated on the
+ // speeder rather than the wingmen now that the player's craft can crash.
+ //
+ // No longer the AI wingman's death, though — that is `speederCrash2` below,
+ // whose recording contains the whole fall rather than one impact.
+ speederCrash: {
+  url: "audio/speeder-explosion.mp3",
+  bus: "sfx",
+  gain: 0.9,
+  minGap: 0.5,
+  needs: "speeder",
+ },
 
-    // The wingman going in: seven and a half seconds of one continuous event.
-    //
-    // This sample is not an impact, it is a *sequence* — the craft is hit, it
-    // falls, it strikes the snow at t≈4.0 s, skips, and the final crash lands at
-    // t≈5.5 s with debris settling after. That makes it the clock rather than a
-    // reaction to one: the flight is timed to the recording, not the other way
-    // round, so it is fired once at the killing hit and nothing else about the
-    // fall makes a sound. A second crash layered on the ground contact would be
-    // the sample's own crash doubled a frame out of step with itself, which is
-    // the one thing that would give the whole choreography away.
-    //
-    // Hence the six-second floor. It is not a machine-gun guard like the carve
-    // sounds' — it is longer than the part of the clip that carries the event,
-    // so two wingmen dying a moment apart cannot smear their impacts across each
-    // other into mush. The cost is that the second death is silent, and a silent
-    // second death is better than two crashes landing on top of one another.
-    //
-    // `needs: "showWingman"` because this is the AI's crash specifically; with
-    // the wingmen switched off nothing can ever fire it, so it should not even
-    // be fetched.
-    speederCrash2: {
-        url: "audio/speeder-crash-2.mp3",
-        bus: "sfx",
-        gain: 0.95,
-        minGap: 6,
-        needs: "showWingman",
-    },
+ // The wingman going in: seven and a half seconds of one continuous event.
+ //
+ // This sample is not an impact, it is a *sequence* — the craft is hit, it
+ // falls, it strikes the snow at t≈4.0 s, skips, and the final crash lands at
+ // t≈5.5 s with debris settling after. That makes it the clock rather than a
+ // reaction to one: the flight is timed to the recording, not the other way
+ // round, so it is fired once at the killing hit and nothing else about the
+ // fall makes a sound. A second crash layered on the ground contact would be
+ // the sample's own crash doubled a frame out of step with itself, which is
+ // the one thing that would give the whole choreography away.
+ //
+ // Hence the six-second floor. It is not a machine-gun guard like the carve
+ // sounds' — it is longer than the part of the clip that carries the event,
+ // so two wingmen dying a moment apart cannot smear their impacts across each
+ // other into mush. The cost is that the second death is silent, and a silent
+ // second death is better than two crashes landing on top of one another.
+ //
+ // `needs: "showWingman"` because this is the AI's crash specifically; with
+ // the wingmen switched off nothing can ever fire it, so it should not even
+ // be fetched.
+ speederCrash2: {
+  url: "audio/speeder-crash-2.mp3",
+  bus: "sfx",
+  gain: 0.95,
+  minGap: 6,
+  needs: "showWingman",
+ },
 
-    // A speeder striking a walker's hull — a metal-on-metal impact, a second
-    // long, distinct from the explosion above because hitting an AT-AT's leg at
-    // speed is not the same event as a craft detonating in the snow.
-    //
-    // Short floor: a glancing pass can clip the same machine two or three times
-    // over as it goes by, and those genuinely are separate hits — a quarter of a
-    // second only stops one contact resolving over consecutive frames into a
-    // burst. Gated on the speeder rather than the walkers because the player is
-    // the one who causes it.
-    speederHitWalker: {
-        url: "audio/speeder-hit-walker.mp3",
-        bus: "sfx",
-        gain: 0.85,
-        minGap: 0.25,
-        needs: "speeder",
-    },
+ // A speeder striking a walker's hull — a metal-on-metal impact, a second
+ // long, distinct from the explosion above because hitting an AT-AT's leg at
+ // speed is not the same event as a craft detonating in the snow.
+ //
+ // Short floor: a glancing pass can clip the same machine two or three times
+ // over as it goes by, and those genuinely are separate hits — a quarter of a
+ // second only stops one contact resolving over consecutive frames into a
+ // burst. Gated on the speeder rather than the walkers because the player is
+ // the one who causes it.
 
-    // Passing under an AT-AT: the hull noise you only hear from beneath one.
-    // The trigger latches per machine (see `walkerFlyby`) so it cannot stutter
-    // while the craft sits alongside one — and this floor is the other half of
-    // "once": a run down the line crosses two or three machines inside a couple
-    // of seconds, and each of them arming separately would stack the same
-    // 1.7 s sample over itself. One report per sweep, not one per leg.
-    // The player's own crash, whole. Like `speederCrash2` this is not a
-    // report but a timeline — the hit, the fall, and the impact at 1.8 s —
-    // so it is fired ONCE when the craft starts going in and nothing speaks
-    // again at the ground. The fall takes 2.1 s, so it is played 0.3 s late
-    // to put its own impact on the frame the hull actually arrives.
-    speederCrash3: {
-        url: "audio/speeder-crash-3.mp3",
-        bus: "sfx",
-        gain: 0.95,
-        minGap: 4,
-        needs: "speeder",
-    },
 
-    walkerFlyby: {
-        url: "audio/walker-flyby.mp3",
-        bus: "sfx",
-        gain: 0.8,
-        minGap: 3.0,
-        needs: "speeder",
-    },
+ // Passing under an AT-AT: the hull noise you only hear from beneath one.
+ // The trigger latches per machine (see `walkerFlyby`) so it cannot stutter
+ // while the craft sits alongside one — and this floor is the other half of
+ // "once": a run down the line crosses two or three machines inside a couple
+ // of seconds, and each of them arming separately would stack the same
+ // 1.7 s sample over itself. One report per sweep, not one per leg.
+ // The player's own crash, whole. Like `speederCrash2` this is not a
+ // report but a timeline — the hit, the fall, and the impact at 1.8 s —
+ // so it is fired ONCE when the craft starts going in and nothing speaks
+ // again at the ground. The fall takes 2.1 s, so it is played 0.3 s late
+ // to put its own impact on the frame the hull actually arrives.
+ speederCrash3: {
+  url: "audio/speeder-crash-3.mp3",
+  bus: "sfx",
+  gain: 0.95,
+  minGap: 4,
+  needs: "speeder",
+ },
 
-    // The repulsorlift. One loop, held for as long as the craft exists, with its
-    // rate and its level ridden by speed — idling low and slow, opening up under
-    // power. Natively looped rather than overlapped for exactly the reason the
-    // board is: an overlap schedule is laid out in real seconds and cannot follow
-    // a playback rate that changes every frame.
-    speederJet: {
-        url: "audio/delta-jet.mp3",
-        needs: "speeder",
-        bus: "sfx",
-        loop: true,
-        gain: 0.62,
-        trim: 0.06,
-    },
 
-    // The Ribbon landing. Spell 2 is the only one with two sounds, because it is
-    // the only one that is two events: `spell2` is the water leaving the hand on
-    // the press, this is the thrown body hitting the snow some time later — and
-    // how much later is up to the player, since the ribbon is a held cast.
-    //
-    // Not exclusive: one impact is one event, and there is only ever one ribbon.
-    spell2Land: { url: "audio/effect2-landing.mp3", bus: "sfx", gain: 0.7, minGap: 0.12 },
+
+ // The repulsorlift. One loop, held for as long as the craft exists, with its
+ // rate and its level ridden by speed — idling low and slow, opening up under
+ // power. Natively looped rather than overlapped for exactly the reason the
+ // board is: an overlap schedule is laid out in real seconds and cannot follow
+ // a playback rate that changes every frame.
+ speederJet: {
+  url: "audio/delta-jet.mp3",
+  needs: "speeder",
+  bus: "sfx",
+  loop: true,
+  gain: 0.62,
+  trim: 0.06,
+ },
+
+ // The Ribbon landing. Spell 2 is the only one with two sounds, because it is
+ // the only one that is two events: `spell2` is the water leaving the hand on
+ // the press, this is the thrown body hitting the snow some time later — and
+ // how much later is up to the player, since the ribbon is a held cast.
+ //
+ // Not exclusive: one impact is one event, and there is only ever one ribbon.
+ spell2Land: { url: "audio/effect2-landing.mp3", bus: "sfx", gain: 0.7, minGap: 0.12 },
 };
