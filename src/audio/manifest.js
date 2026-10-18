@@ -94,14 +94,7 @@ export const AUDIO_MANIFEST = {
  // bed's two and a half. The track ends loud and begins quiet, so the join is
  // a real musical event rather than a seam in a texture, and it needs the long
  // window to pass as a decay.
- music: {
-  url: "audio/imperial.mp3",
-  bus: "music",
-  loop: true,
-  gain: 1.20,
-  trim: 0.08,
-  crossfade: 4.0,
- },
+ // Music stubbed out: no score track loaded or played.
 
  // The board on snow, held for as long as the slide is. Natively looped
  // rather than overlapped: its rate is modulated by speed every frame, which
