@@ -1231,7 +1231,7 @@ async function boot() {
   // its own voice track, so when the film made it down, the standalone
   // line stays quiet — doubling the voice is worse than either alone.
   // The film falls back to it only if it can't play with sound.
-  if (!introFilm.ok) {
+  if (!false) {
    audio.play("lukeIntro", { delay: 0.5 });
   }
  }
