@@ -44,7 +44,7 @@ import { Soundscape } from "./audio/soundscape.js";
 import { createSoundButton } from "./ui/soundButton.js";
 import { createTouchControls } from "./ui/touchControls.js";
 import { OPENING, applyOpening, installShotCapture } from "./core/openingShot.js";
-
+import { loadModelAsset } from "./walkers/modelAsset.js";
 // ------------------------------------------------------- module-scope scratch
 const _vel = new THREE.Vector3();
 /** Scratch: where the crash camera is pointed. See the death-cam block. */
@@ -129,16 +129,8 @@ async function boot() {
  // The hosted cut is the ONE source, deliberately: a local copy in
  // `public/video/` used to be tried first and win, which meant a freshly
  // uploaded clip silently lost to a stale file nobody remembered shipping.
- // Same reasoning for the walkers: 4.4 MB of geometry, three levels of detail
- // and one baked gait, none of which needs a device to arrive. It is awaited
- // well after the terrain.
- const walkerReady = loadWalkerAsset("models/walker");
- // The AT-ST escort rides the same loader and the same herd machinery —
- // and so does the infantry walking beside it.
- const atstReady = loadWalkerAsset("models/atst");
- const trooperReady = loadWalkerAsset("models/trooper");
- // The crash-site pilot — one death clip, played once and held.
- const pilotReady = loadWalkerAsset("models/pilot");
+ // Only the speeder (player or wingman) needs a baked asset now — the walker
+ // herd, AT-ST escort and trooper infantry were purged.
  // Only when it is actually going to fly. Off — which is the default — the
  // speeder costs nothing at all: no fetch, no decode, no pipeline.
  const FLYING = S.speeder === true;
@@ -154,7 +146,7 @@ async function boot() {
  // S.speeder — the toggle needs a reload to *create* the craft, and only
  // hides it live.
  const WINGMAN = S.showWingman !== false;
- const speederReady = FLYING || WINGMAN ? loadWalkerAsset("models/speeder") : null;
+ const speederReady = FLYING || WINGMAN ? loadModelAsset("models/speeder") : null;
 
  await loading.phase("creating device", 0.05);
 
@@ -281,32 +273,6 @@ async function boot() {
  // a shellburst stirs and rises rather than napping through the battle.
  const GETUP_SKIP = 5.5;
  const DEATHS = ["death1", "death2", "death3"];
- const squadImpact = (x, _y, z) => {
-  const n = Math.min(troopers.count, troopers.walkers.length);
-  for (let i = 0; i < n; i++) {
-   const w = troopers.walkers[i];
-   const d = Math.hypot(w.position.x - x, w.position.z - z);
-   if (d > 9) continue;
-   if (d < 1.7) {
-    w.react(DEATHS[(Math.random() * DEATHS.length) | 0], {
-     hold: true, linger: 12,
-    });
-   } else if (d < 6) {
-    // Which side the burst is on, in the trooper's own frame.
-    const rightward = (x - w.position.x) * Math.cos(w.yaw)
-     - (z - w.position.z) * Math.sin(w.yaw);
-    w.react(rightward > 0 ? "jumpLeft" : "jumpRight", {
-     then: { name: "gettingUp", startAt: GETUP_SKIP },
-    });
-   } else {
-    w.react("hitReaction");
-   }
-  }
- };
- for (const w of wingmen) {
-  if (w.craft?.bolts) w.craft.bolts.ctx.onImpact = squadImpact;
- }
- if (speeder?.bolts) speeder.bolts.ctx.onImpact = squadImpact;
  // The same impacts, one more listener: a qualifying burst sometimes
  // blossoms into a fireball. Chained over whatever handler is installed
  // rather than replacing it — the crater, the spray and the flinching
@@ -328,8 +294,7 @@ async function boot() {
  // always-blossom path — incoming fire that bursts into flame is most of
  // what makes the walk toward the line feel like a bombardment. The
  // AT-STs' slim chin guns stay a kick of snow; a scout is not artillery.
- chainBurst(walkers.bolts, true);
- chainBurst(walkers2.bolts, true);
+ // Walkers purged: no AT-AT/AT-ST bolt chains remain.
 
  // The wingmen can be shot down — by the *Imperial* guns only. Three hits,
  // spaced by a grace window so the stages play out: black smoke, then fire,
@@ -337,9 +302,10 @@ async function boot() {
  // thrown snow, and a fresh airframe brought in from deep for that seat.
  // The graveyard hulls: one frozen Speeder per seat, posed by the crash
  // and left there. Built only when there are wingmen to lose.
+ let wrecks = null;
  if (wingmen.length) {
   const speederAsset2 = await speederReady;
-  const wrecks = [];
+  wrecks = [];
   let wreckNext = 0;
   for (let i = 0; i < 3; i++) {
    const ctl = {
@@ -707,33 +673,6 @@ async function boot() {
  let crossFired = false;
  const walkerFlyby = () => {
   if (!speeder || S.speeder !== true) return;
-  let nearest = Infinity;
-  for (const herd of [walkers, walkers2]) {
-   if (!herd || !herd.walkers) continue;
-   const n = Math.min(herd.count, herd.walkers.length);
-   const scale = herd.tune?.scale ? herd.tune.scale() : 1;
-   for (let i = 0; i < n; i++) {
-    const w = herd.walkers[i];
-    if (!w || w.oneshot) continue;
-    const d = Math.hypot(
-     w.position.x - character.position.x,
-     w.position.z - character.position.z
-    );
-    if (d < nearest) nearest = d;
-    if (!audio) continue;
-    const fired = flybyArmed.get(w) === true;
-    if (!fired && d < FLYBY_IN * scale) {
-     flybyArmed.set(w, true);
-     const near = Math.max(0, 1 - d / 200);
-     audio.play("walkerFlyby", {
-      gain: 0.9 * near * near,
-      rate: 0.96 + Math.random() * 0.08,
-     });
-    } else if (fired && d > FLYBY_OUT * scale) {
-     flybyArmed.set(w, false);
-    }
-   }
-  }
 
   // Luke's second call, once a session: the player has closed on the
   // line. Held off until the opening hold has fully released and the
@@ -745,41 +684,7 @@ async function boot() {
  speeder?.setVisible(true);
  showFigure();
 
- // The walkers' cannons throw snow into the same pool everything else does —
- // and the escort's, whose slimmer bolts kick up proportionally less of it.
- walkers.setSpray(spray);
- walkers2.setSpray(spray);
- atsts.setSpray(spray);
-
- // A trooper's footfall: the same boot print and heel-scoop kick the player
- // character stamps (see `SnowContact`), sized to a walking soldier and
- // fired off the herd's own footfall counter — so every step both marks the
- // snow and throws a little of it, which is what sells twelve small figures
- // as *wading* rather than gliding. Feet alternate on step parity.
- troopers.onStep = (w) => {
-  const fx = Math.sin(w.yaw), fz = Math.cos(w.yaw);
-  const side = (w.stepCount % 2 === 0 ? 1 : -1) * 0.18;
-  const px = w.position.x + fz * side + fx * 0.12;
-  const pz = w.position.z - fx * side + fz * 0.12;
-  terrain.deform.brush(
-   px, pz, 0.10, 0.16, 0.09, 0.9, 0, w.yaw, 1.7, 1.0
-  );
-  for (let k = 0; k < 7; k++) {
-   const rx = (Math.random() - 0.5) * 0.9;
-   const rz = (Math.random() - 0.5) * 0.9;
-   const clod = Math.random() < 0.22 ? 1 : 0;
-   spray.emit(
-    px + rx * 0.09, w.position.y + 0.03 + Math.random() * 0.05,
-    pz + rz * 0.09,
-    -fx * (0.4 + Math.random() * 0.9) + rx * 1.2,
-    (0.8 + Math.random() * 1.5) * (clod ? 1.25 : 1),
-    -fz * (0.4 + Math.random() * 0.9) + rz * 1.2,
-    clod ? 0.014 + Math.random() * 0.012 : 0.02 + Math.random() * 0.03,
-    0.5 + Math.random() * 0.5,
-    clod
-   );
-  }
- };
+ // Walkers purged: no herd spray/footfall wiring.
 
  // Feet and the surf groove write into the terrain state buffer through here.
  const contact = new SnowContact(character, terrain.deform, figure.figure, spray);
@@ -806,18 +711,7 @@ async function boot() {
   terrain.material, figure.bodyMat, figure.clothMat,
   wake.material, spray.material
  );
- // The herd can grow after boot, so it hands its materials over as they are
- // built rather than being enumerated once here.
- walkers.onMaterial = (m) => spells.addConsumers(m);
- for (const w of walkers.walkers) spells.addConsumers(w.material);
- walkers2.onMaterial = (m) => spells.addConsumers(m);
- for (const w of walkers2.walkers) spells.addConsumers(w.material);
- atsts.onMaterial = (m) => spells.addConsumers(m);
- for (const w of atsts.walkers) spells.addConsumers(w.material);
- troopers.onMaterial = (m) => spells.addConsumers(m);
- pilots.onMaterial = (m) => spells.addConsumers(m);
- for (const w of pilots.walkers) spells.addConsumers(w.material);
- for (const w of troopers.walkers) spells.addConsumers(w.material);
+ // Walkers purged: no herd materials.
  spells.registerPrepass(depthPass);
 
  // The rig needs ground heights to keep the spring arm above the snow.
@@ -914,7 +808,7 @@ async function boot() {
  // stays silent until `start()`, which only happens on the gesture that
  // unlocks the engine — the boot gate below, or the corner button later.
  const soundscape = new Soundscape(
-  audio, { controller: character, spells, atst: atsts, speeder }
+  audio, { controller: character, spells, atst: null, speeder }
  );
  const soundButton = createSoundButton(audio, { onEnable: () => soundscape.start() });
  // Mobile belt: some engines refuse an AudioContext resume that did not
@@ -942,16 +836,7 @@ async function boot() {
  figure.update(0);
  figure.sync(rig.camera.position);
  await figure.warmUp();
- walkers.sync(rig.camera.position);
- await walkers.warmUp();
- walkers2.sync(rig.camera.position);
- await walkers2.warmUp();
- atsts.sync(rig.camera.position);
- await atsts.warmUp();
- troopers.sync(rig.camera.position);
- await troopers.warmUp();
- pilots.sync(rig.camera.position);
- await pilots.warmUp();
+ // walkers/herds purged: no sync/warmUp.
  destroyers.update(character.position, rig.camera.position);
  await destroyers.warmUp();
  if (speeder) {
@@ -1116,11 +1001,7 @@ async function boot() {
   // The walkers only read the player's position, so they can sit anywhere
   // after the controller has moved. Here, so their cost lands in the same
   // row of the overlay as the rest of the scene's inhabitants.
-  walkers.update(dt, character.position);
-  walkers2.update(dt, character.position);
-  atsts.update(dt, character.position);
-  troopers.update(dt, character.position);
-  pilots.update(dt, character.position);
+  // walkers/herds purged: no update.
   // The crash sites burn down and freeze over: smoke and fire for the
   // first half minute, thinning as the heat dies, and then the slow
   // frost — the hull whitening into the field over a couple of minutes.
@@ -1156,167 +1037,6 @@ async function boot() {
    }
    wk.hull.snowOverride = Math.min(1, wk.age / 150);
    wk.hull.update(dt);
-  }
-  // ---- formation discipline ------------------------------------------
-  // The herd machinery aims a machine once and never corrects — right
-  // for a walker crossing a field, wrong for an escort that belongs to
-  // something. Every frame:
-  //
-  //   scouts    ease straight out of the walkers' keep-clear, so the
-  //             lines never merge however the columns converge.
-  //   troopers  *steer* — far from their squad station they turn toward
-  //             it and press the pace; near it they fall in on the
-  //             scout's own heading. A soldier can no longer march off
-  //             on a stale bearing, because his bearing is his squad's.
-  {
-   const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
-   // AT-AT collision avoidance, over *both* herds as one population.
-   // Tempo alone cannot do this: it strings out machines on parallel
-   // courses, but these converge on the player from different
-   // bearings, so their paths cross and a slowed machine just meets
-   // the other later. So the yielding machine (the one further from
-   // the player) *steers* — a gentle bend away from anything in its
-   // forward cone, at a rate a walker could plausibly turn at,
-   // started early enough to be invisible. Tempo still strings out
-   // the followers, and a hard emergency floor keeps hulls apart if
-   // geometry conspires anyway.
-   {
-    const scale = /** @type {number} */ (S.walkerScale);
-    const look = 95 * scale;   // begin bending away
-    const hard = 30 * scale;   // absolute hull floor
-    const all = [];
-    for (const herd of [walkers, walkers2]) {
-     const n = Math.min(herd.count, herd.walkers.length);
-     for (let i = 0; i < n; i++) all.push(herd.walkers[i]);
-    }
-    const p = character.position;
-    // The line advances as a *formation*: one shared bearing that
-    // every machine eases its heading toward, each with a slow
-    // personal wander so the line drifts naturally rather than
-    // marching a parade. Parallel courses cannot cross, which is
-    // the whole fix; the steer/tempo/floor below are the belt
-    // over these braces.
-    //
-    // The bearing is the line's own, latched *once*: the circular
-    // mean of the opening line's headings, computed on the first
-    // frame and never touched again. Nothing about it ever reads
-    // the player's position — not directly, and not laundered
-    // through recycled machines re-aiming at placement — so the
-    // line can never swing to face them. It marches its course.
-    if (all.length) {
-     if (advanceBearing === null) {
-      let sx = 0, sz = 0;
-      for (const w of all) {
-       sx += Math.sin(w.yaw);
-       sz += Math.cos(w.yaw);
-      }
-      advanceBearing = Math.atan2(sx, sz);
-     }
-     for (let i = 0; i < all.length; i++) {
-      const w = all[i];
-      const wander = Math.sin(time * 0.07 + i * 2.1) * 0.09;
-      const want = advanceBearing + wander;
-      w.yaw = wrap(w.yaw + wrap(want - w.yaw) * Math.min(1, dt * 0.5));
-     }
-    }
-    for (let i = 0; i < all.length; i++) {
-     for (let k = i + 1; k < all.length; k++) {
-      const A = all[i];
-      const B = all[k];
-      const dx = B.position.x - A.position.x;
-      const dz = B.position.z - A.position.z;
-      const d = Math.hypot(dx, dz);
-      if (d >= look) continue;
-      const crowd = 1 - d / look;
-      const dA = Math.hypot(p.x - A.position.x, p.z - A.position.z);
-      const dB = Math.hypot(p.x - B.position.x, p.z - B.position.z);
-      const yieldW = dA > dB ? A : B;
-      const other = dA > dB ? B : A;
-      // Steer: only if the other machine sits ahead-ish of
-      // the yielder's course; bend away from it, harder as
-      // it gets closer.
-      const bearing = Math.atan2(
-       other.position.x - yieldW.position.x,
-       other.position.z - yieldW.position.z
-      );
-      const rel = wrap(bearing - yieldW.yaw);
-      if (Math.abs(rel) < 0.85) {
-       const turn = 0.16 * crowd * (rel >= 0 ? -1 : 1);
-       yieldW.yaw = wrap(yieldW.yaw + turn * dt);
-      }
-      // Tempo still strings the pair out.
-      yieldW._rateWant -= crowd * 0.25;
-      other._rateWant += crowd * 0.1;
-      // Emergency floor: hulls must never interpenetrate,
-      // whatever it costs the gait for a few frames.
-      if (d < hard && d > 1e-3) {
-       const push = (hard - d) * 0.5 * Math.min(1, dt * 3);
-       const nx = dx / d, nz = dz / d;
-       A.position.x -= nx * push;
-       A.position.z -= nz * push;
-       B.position.x += nx * push;
-       B.position.z += nz * push;
-      }
-     }
-    }
-   }
-   // Scouts hold their distance from the armour.
-   const an = Math.min(atsts.count, atsts.walkers.length);
-   for (const herd of [walkers, walkers2]) {
-    const wn = Math.min(herd.count, herd.walkers.length);
-    for (let i = 0; i < an; i++) {
-     const a2 = atsts.walkers[i];
-     for (let k = 0; k < wn; k++) {
-      const W = herd.walkers[k];
-      const dx = a2.position.x - W.position.x;
-      const dz = a2.position.z - W.position.z;
-      const d = Math.hypot(dx, dz);
-      const min = 42 * /** @type {number} */ (S.walkerScale);
-      if (d < min && d > 1e-3) {
-       const push = (min - d) * Math.min(1, dt * 3.2);
-       a2.position.x += (dx / d) * push;
-       a2.position.z += (dz / d) * push;
-      }
-     }
-    }
-   }
-   // The squads fall in on their stations.
-   const tn = Math.min(troopers.count, troopers.walkers.length);
-   for (let i = 0; i < tn; i++) {
-    const t = troopers.walkers[i];
-    if (t.oneshot) continue;
-    const st = trooperStation(i);
-    if (st) {
-     const dx = st.x - t.position.x;
-     const dz = st.z - t.position.z;
-     const d = Math.hypot(dx, dz);
-     // Heading: to the station when adrift, the scout's own
-     // when in place. Eased — a soldier turns, he does not snap.
-     const want = d > 5 ? Math.atan2(dx, dz) : st.host.yaw;
-     t.yaw = wrap(t.yaw + wrap(want - t.yaw) * Math.min(1, dt * 2.0));
-     // Tempo: press to catch a station that has pulled ahead,
-     // ease off when overshooting past it. Written onto the
-     // herd's own trim so the feet stay planted at any pace.
-     const ahead = dx * Math.sin(t.yaw) + dz * Math.cos(t.yaw);
-     t._rateWant += Math.max(-0.35, Math.min(0.6, ahead / 18));
-    }
-    // And never under a walker, whatever the station says.
-    for (const herd of [walkers, walkers2]) {
-     const wn = Math.min(herd.count, herd.walkers.length);
-     for (let k = 0; k < wn; k++) {
-      const W = herd.walkers[k];
-      const dx = t.position.x - W.position.x;
-      const dz = t.position.z - W.position.z;
-      const d = Math.hypot(dx, dz);
-      const min = 24 * /** @type {number} */ (S.walkerScale);
-      if (d < min && d > 1e-3) {
-       const push = (min - d) * Math.min(1, dt * 2.2);
-       t.position.x += (dx / d) * push;
-       t.position.z += (dz / d) * push;
-      }
-     }
-    }
-   }
   }
   speeder?.tick(dt);
   speeder?.update(dt);
@@ -1409,11 +1129,7 @@ async function boot() {
   figure.sync(rig.camera.position);
   // Also picks each walker's level of detail, which needs this frame's
   // camera and this frame's field of view.
-  walkers.sync(rig.camera.position);
-  walkers2.sync(rig.camera.position);
-  atsts.sync(rig.camera.position);
-  troopers.sync(rig.camera.position);
-  pilots.sync(rig.camera.position);
+  // walkers/herds purged: no sync.
   for (const wk of wrecks) {
    if (wk.active) wk.hull.sync(rig.camera.position);
   }
@@ -1424,8 +1140,7 @@ async function boot() {
   // The tuning rings, after every transform they pin to has settled.
   muzzleMarkers.begin();
   if (S.showMuzzles) {
-   walkers?.collectMuzzles?.(muzzleMarkers);
-   walkers2?.collectMuzzles?.(muzzleMarkers);
+   // walkers/herds purged: no muzzle collection.
    speeder?.collectMuzzles?.(muzzleMarkers);
   }
   muzzleMarkers.commit(rig.camera.position);
@@ -1475,11 +1190,7 @@ async function boot() {
    (S.showCharacter && !FLYING ? figure.triangles : 0) +
    (speeder ? speeder.triangles : 0) +
    wingmen.reduce((t, w) => t + w.triangles, 0) +
-   walkers.triangles +
-   walkers2.triangles +
-   atsts.triangles +
-   troopers.triangles +
-   pilots.triangles +
+   // walkers/herds purged: no triangle counts.
    (wake.mesh && wake.mesh.visible ? wake.mesh.metadata.triangles : 0) +
    spells.triangles +
    spray.liveCount * 2;
@@ -1497,11 +1208,9 @@ async function boot() {
  // device existed. This phase only shows up on a cold cache or a slow line.
  await loading.phase("loading audio", 0.96);
  await audioReady;
- await filmReady;
  // The second transmission is fetched behind the boot with everything
  // else, so the moment it is called for it plays local bytes — a clip that
  // buffered mid-battle would arrive after the moment that earned it.
- await crossReady;
 
  // One click to enter, and that click is also the gesture that makes sound
  // legal. `unlock()` is issued from inside the handler — hence the callback —
@@ -1545,7 +1254,7 @@ async function boot() {
  setTimeout(() => overlay.resetSpikes(), 800);
 
  globalThis.SNOWFLOW = {
-  gfx, scene: gfx.scene, rig, character, figure, walkers, walkers2, atsts, troopers, pilots, wrecks, speeder, wingman, wingmen, collision, contact, spray, wake, spells, destroyers, explosions,
+  gfx, scene: gfx.scene, rig, character, figure, wrecks, speeder, wingman, wingmen, collision, contact, spray, wake, spells, destroyers, explosions,
   overlay, touchControls, terrain, sky, shadows, post, depthPass,
   audio, soundscape,
   S, input, perfStats: stats,

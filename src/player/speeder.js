@@ -106,7 +106,7 @@ export class Speeder {
   * @param {import("../terrain/terrain.js").Terrain} terrain
   * @param {import("../render/sky.js").Sky} sky
   * @param {import("../render/shadows.js").ShadowSystem} shadows
-  * @param {import("../walkers/walkerAsset.js").WalkerAsset} asset
+  * @param {import("../walkers/modelAsset.js").ModelAsset} asset
   * @param {import("../character/controller.js").CharacterController} controller
   * @param {import("../vfx/particles.js").SprayField} [spray]
   */
