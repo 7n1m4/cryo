@@ -28,7 +28,7 @@ const SH_H = 32;
  * exposure handles overall brightness — but it must be *one* number, applied to
  * both, or the sun/sky ratio stops meaning anything.
  */
-const SUN_SCALE_BASE = 5.5;
+const SUN_SCALE_BASE = 0.18;
 
 // ------------------------------------------------------- module-scope scratch
 const _dir = new THREE.Vector3();
@@ -38,10 +38,6 @@ const _irrTmp = new Float32Array(3);
 /** Fresh snow reflects most of what hits it, slightly more at the blue end. */
 const SNOW_ALBEDO = [0.83, 0.86, 0.91];
 
-function clamp(v, lo, hi) {
-    return v < lo ? lo : v > hi ? hi : v;
-}
-
 export class Sky {
     /** @param {import("../core/gfx.js").Gfx} gfx */
     constructor(gfx) {
@@ -50,7 +46,7 @@ export class Sky {
         /** Unit vector pointing *toward* the sun. */
         this.sunDir = new THREE.Vector3(0, 0.2, 1);
         /** Normalised hue of direct sunlight, for tinting effects. */
-        this.sunColor = new THREE.Color(1, 0.85, 0.66);
+        this.sunColor = new THREE.Color(0.69, 0.80, 1.0);
         /**
          * Direct solar irradiance reaching the ground, in the *same units the
          * sky LUT stores radiance in*. Everything downstream reads this rather
@@ -158,31 +154,9 @@ export class Sky {
 
         this.sunScale = S.sunIntensity * SUN_SCALE_BASE;
 
-        // Direct sunlight reddens as it grazes: the lower the sun, the longer
-        // the path through the atmosphere and the more of the blue end is
-        // scattered out of the beam. At 13 degrees the beam has already lost
-        // most of its blue, which is what makes the warm-light / cool-shadow
-        // split physical rather than an art choice.
-        const zenithDeg = (Math.acos(clamp(this.sunDir.y, -1, 1)) * 180) / Math.PI;
-
-        // Kasten-Young air mass — stays finite at the horizon, unlike 1/cos.
-        const denom =
-            Math.cos((zenithDeg * Math.PI) / 180) +
-            0.50572 * Math.pow(Math.max(1e-3, 96.07995 - zenithDeg), -1.6364);
-        const airMass = Math.min(denom > 0 ? 1 / denom : 40, 40);
-
-        // Vertical optical depth: scattering coefficient x scale height.
-        const warm = S.sunTempWarm;
-        const tauR = [0.0464, 0.108, 0.265];
-        const tauM = 0.0252;
-        const r = Math.exp(-(tauR[0] * warm + tauM) * airMass);
-        const g = Math.exp(-(tauR[1] * warm + tauM) * airMass);
-        const b = Math.exp(-(tauR[2] * warm + tauM) * airMass);
-
-        this.sunRadiance.setRGB(r * this.sunScale, g * this.sunScale, b * this.sunScale);
-
-        const m = Math.max(r, Math.max(g, b)) || 1;
-        this.sunColor.setRGB(r / m, g / m, b / m);
+        // Pulsar/key light: cool, low irradiance.
+        this.sunRadiance.setRGB(0.25 * this.sunScale, 0.28 * this.sunScale, 0.32 * this.sunScale);
+        this.sunColor.setRGB(0.69, 0.80, 1.0);
     }
 
     /**
