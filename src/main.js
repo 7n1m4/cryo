@@ -27,12 +27,10 @@ import { SmokeTrails } from "./vfx/smokeTrails.js";
 import { SurfWake } from "./vfx/surfWake.js";
 import { SpellSystem } from "./spells/spellSystem.js";
 import { Speeder } from "./player/speeder.js";
-import { Wingman, emitBurnTrail } from "./player/wingman.js";
-import { CollisionPass } from "./physics/collisionPass.js";
+import { CollisionPass, emitBurnTrail } from "./physics/collisionPass.js";
 import { Overlay } from "./ui/overlay.js";
 import { createFpsMeter } from "./ui/fpsMeter.js";
 import { Sky } from "./render/sky.js";
-import { Destroyers } from "./render/destroyers.js";
 import { ShadowSystem } from "./render/shadows.js";
 import { Terrain } from "./terrain/terrain.js";
 import { DepthPass } from "./render/depthPass.js";
@@ -40,7 +38,6 @@ import { PostChain } from "./post/postChain.js";
 import { whenReady } from "./core/gpuUtil.js";
 import * as loading from "./core/loading.js";
 import { audio } from "./audio/engine.js";
-import { Soundscape } from "./audio/soundscape.js";
 import { createSoundButton } from "./ui/soundButton.js";
 import { createTouchControls } from "./ui/touchControls.js";
 import { OPENING, applyOpening, installShotCapture } from "./core/openingShot.js";
@@ -129,7 +126,7 @@ async function boot() {
  // The hosted cut is the ONE source, deliberately: a local copy in
  // `public/video/` used to be tried first and win, which meant a freshly
  // uploaded clip silently lost to a stale file nobody remembered shipping.
- // Only the speeder (player or wingman) needs a baked asset now — the walker
+ // Only the speeder (player) needs a baked asset now — the walker
  // herd, AT-ST escort and trooper infantry were purged.
  // Only when it is actually going to fly. Off — which is the default — the
  // speeder costs nothing at all: no fetch, no decode, no pipeline.
@@ -144,12 +141,9 @@ async function boot() {
  // darker still, when a T-47 is a light grey aircraft. So the maps arrive in
  // the space they are wanted in and something else is eating the value. The
  // option stays because the next model through here may genuinely need it.
- // The wingman flies the same model whether or not the player does, so the
- // craft asset loads if either seat is occupied. Latched at boot like
- // S.speeder — the toggle needs a reload to *create* the craft, and only
- // hides it live.
- const WINGMAN = S.showWingman !== false;
- const speederReady = FLYING || WINGMAN ? loadModelAsset("models/speeder") : null;
+ // Latched at boot like S.speeder — the toggle needs a reload to *create* the
+ // craft, and only hides it live.
+ const speederReady = FLYING ? loadModelAsset("models/speeder") : null;
 
  await loading.phase("creating device", 0.05);
 
@@ -173,10 +167,6 @@ async function boot() {
  // ------------------------------------------------------------------ sky
  await loading.phase("integrating atmosphere", 0.2);
  const sky = new Sky(gfx);
- // The Imperial fleet on station over the walkers' bearing — set dressing,
- // loaded async and tolerated absent.
- const destroyers = new Destroyers(gfx, sky);
- destroyers.bindCamera(rig.camera.viewProjection);
  await sky.solve();
 
  // -------------------------------------------------------------- shadows
@@ -237,35 +227,9 @@ async function boot() {
   : null;
  speeder?.registerPrepass(depthPass);
 
- // ------------------------------------------------------------ the flight
- // Three AI T-47s in the fight — same presentation, different pilots. Each
- // seat flies its own bearings (seeded a third of a turn apart, orbits
- // alternating direction) and has its own appetite: one hunts the armour,
- // one flies a mixed bag, and one never leaves the trooper squads alone.
- /** @type {Wingman[]} */
  const wingmen = [];
- if (WINGMAN) {
-  const speederAsset = await speederReady;
-  const seats = [
-   { trooperChance: 0.2 },  // the armour hunter
-   { trooperChance: 0.6 },  // flies whatever the field offers
-   { trooperChance: 1.0 },  // the infantry specialist
-  ];
-  for (let i = 0; i < seats.length; i++) {
-   const w = new Wingman(
-    gfx, terrain, sky, shadows, speederAsset,
-    null, spray, character, null,
-    { ...seats[i], seat: i }
-   );
-   w.registerPrepass(depthPass);
-   wingmen.push(w);
-  }
- }
- const wingman = wingmen[0] ?? null;
-
- // Where a cannon bolt lands, the infantry reacts — the player's guns and
- // the wingman's both report through the same handler. Three rings around
- // the burst:
+ // Where a cannon bolt lands, the infantry reacts — the player's guns report
+ // through this handler. Three rings around the burst:
  //
  //   < 1.7 m   a hit. One of the three deaths, held on its final frame; the
  //             body lies in the snow a while, then the herd recycles it
@@ -280,12 +244,6 @@ async function boot() {
  // a shellburst stirs and rises rather than napping through the battle.
  // Walkers purged: no AT-AT/AT-ST bolt chains remain.
 
- // The wingmen can be shot down — by the *Imperial* guns only. Three hits,
- // spaced by a grace window so the stages play out: black smoke, then fire,
- // then the third puts it into the snow — fireball, crater, a heavy kick of
- // thrown snow, and a fresh airframe brought in from deep for that seat.
- // The graveyard hulls: one frozen Speeder per seat, posed by the crash
- // and left there. Built only when there are wingmen to lose.
  let wrecks = null;
  let leaveWreck = null;
  if (wingmen.length) {
@@ -316,8 +274,7 @@ async function boot() {
   /**
    * Leave a hull in the snow, and its pilot beside it.
    *
-   * The graveyard's one door. An escort's fall comes through here, and so
-   * does the player's own crash — the same wreck, the same body thrown
+   * The player's own crash comes through here — the same wreck, the same body
    * clear, because a snowspeeder that went in looks like a snowspeeder that
    * went in whoever was flying it. For the player it is also what makes the
    * restart mean something: they fly back out to the line past the ship
@@ -556,7 +513,6 @@ async function boot() {
   *                  at the contact frame, through `_fx` or `effects`.
   *   the latch      the pilot raises `bounced = true` for one frame — the
   *                  same shape as the existing `crashed` latch — and this
-  *                  clears it. `Wingman.bounced` is accepted too, in case
   *                  the wrapper forwards it rather than the pilot raising it.
   *
   * A pilot that does both fires once — see the debounce inside `onBounce`.
@@ -595,13 +551,8 @@ async function boot() {
   // Where the player's own crash ends up, and what happens after it.
   // Back in the air where the fight is, and flying immediately.
   //
-  // Not the opening. Dying mid-battle is not the same event as
-  // arriving at one: the escorts are in the middle of their own runs
-  // and have no business being teleported back into an echelon, and
-  // freezing the stick for a transmission the player has already seen
-  // is a punishment on top of the crash. So this only ever touches the
-  // player's own craft — staged back down the approach far enough that
-  // they fly in rather than pop into existence, pointed at the battle,
+  // Dying mid-battle is not the same event as arriving at one: the player's
+  // own craft is staged back down the approach, not teleported into an echelon.
   // already making way, with control.
   onRestart: () => {
    if (S.speeder !== true) return;
@@ -620,45 +571,15 @@ async function boot() {
   },
   onWreck: (x, z, facing) => {
    // The body becomes the crash camera's subject — see the
-   // death-cam block in the frame loop. An escort's crash goes
    // through the same door and simply ignores the return.
    deathCamPilot = leaveWreck(x, z, facing);
   },
  });
 
- // The escorts are told what is solid. Their constructor only ever saw the
- // front AT-AT line, so without this they dodge the first wave and fly
- // straight through the second and through every AT-ST — the very machines
- // the collision pass above will happily bounce them off. The troopers are
- // deliberately not in the list: they are man-sized and they are what the
- // low runs exist to strafe.
+ // The collision pass is told what is solid: the player's craft, the parked
+ // hull, and the wreck graveyard. Every collaborator is optional, so a boot
+ // without a speeder still runs the parts it has.
 
- // A low pass is its own kind of near miss: the craft screaming over at
- // deck height sends the squad diving without a shot fired — same dives,
- // same get-up as the shellburst. Keyed off the hull's actual lift and
- // way: up at the clean rungs the lift is saturated and nobody flinches,
- // and a craft hovering alongside is a curiosity, not a threat. The
- // `oneshot` guard is what keeps a lingering pass from re-triggering a
- // trooper who is already in the snow.
-
- /**
-  * The walker flyby: the shadow of the thing passing over you.
-  *
-  * Close enough to an AT-AT and the machine announces itself once — the
-  * hull noise you only ever hear from underneath it. Strictly ONE per
-  * approach: the trigger latches on the way in and does not re-arm until
-  * the craft has left by a comfortable margin, so a pass fires it a single
-  * time and hovering next to a leg fires it a single time, rather than
-  * stuttering the sample every frame the distance function wobbles across
-  * the line. Latched per machine, so threading the length of the line is a
-  * report per walker, which is what it should be.
-  *
-  * Distance-aware like everything else, but on a short leash — this is a
-  * proximity cue, so it is loud when it is earned and gone by 200 m.
-  */
- const FLYBY_IN = 46;      // metres: close enough to be under it
- const FLYBY_OUT = 78;     // and this far back out before it can fire again
- const flybyArmed = new WeakMap();
  /**
   * How near the line the player must get before Luke calls again, metres.
   * Wider than the flyby ring on purpose: the transmission is about having
@@ -667,16 +588,6 @@ async function boot() {
   */
  const CROSSFIRE_AT = 165;
  let crossFired = false;
- const walkerFlyby = () => {
-  if (!speeder) return;
-
-  // Luke's second call, once a session: the player has closed on the
-  // line. Held off until the opening hold has fully released and the
-  // first transmission is off the screen, so the two can never share
-  // the corner or talk over each other. The film itself latches
-  // `spent` the first time it is honoured, so this cannot double up
-  // however many ways the trigger is reached.
- };
  speeder?.setVisible(true);
  showFigure();
 
@@ -804,10 +715,7 @@ async function boot() {
  // The soundscape reads game state; nothing in the game knows it exists. It
  // stays silent until `start()`, which only happens on the gesture that
  // unlocks the engine — the boot gate below, or the corner button later.
- const soundscape = new Soundscape(
-  audio, { controller: character, spells, atst: null, speeder }
- );
- const soundButton = createSoundButton(audio, { onEnable: () => soundscape.start() });
+ const soundButton = createSoundButton(audio);
  // Mobile belt: some engines refuse an AudioContext resume that did not
  // ride a touch gesture, and a phone that entered through the gate without
  // sound would stay silent for ever. Any later touch retries the unlock;
@@ -816,7 +724,6 @@ async function boot() {
   if (audio.hasAssets && !audio.unlocked) {
    audio.unlock().then((ok) => {
     if (ok) {
-     soundscape.start();
      soundButton.sync();
     }
    });
@@ -834,8 +741,6 @@ async function boot() {
  figure.sync(rig.camera.position);
  await figure.warmUp();
  // walkers/herds purged: no sync/warmUp.
- destroyers.update(character.position, rig.camera.position);
- await destroyers.warmUp();
  if (speeder) {
   speeder.update(0);
   speeder?.sync(rig.camera.position);
@@ -1281,8 +1186,6 @@ async function boot() {
   }
   speeder?.sync(rig.camera.position);
   for (const w of wingmen) w.sync(rig.camera.position);
-  // The fleet holds formation on the player; three matrix writes.
-  destroyers.update(character.position, rig.camera.position);
   // The tuning rings, after every transform they pin to has settled.
   muzzleMarkers.begin();
   if (S.showMuzzles) {
@@ -1314,7 +1217,6 @@ async function boot() {
 
   // Last, and a pure reader: every signal it mixes on — surf blend, carve
   // load, speed, cast count — has settled by here.
-  soundscape.update(dt);
   const tAudio = performance.now();
 
   renderFrame();
@@ -1371,7 +1273,6 @@ async function boot() {
  }
  if (unlocking) {
   await unlocking;
-  soundscape.start();
   // Luke, over the fading boot screen. The transmission square carries
   // its own voice track, so when the film made it down, the standalone
   // line stays quiet — doubling the voice is worse than either alone.
@@ -1399,9 +1300,9 @@ async function boot() {
  setTimeout(() => overlay.resetSpikes(), 800);
 
  globalThis.SNOWFLOW = {
-  gfx, scene: gfx.scene, rig, character, figure, wrecks, speeder, wingman, wingmen, collision, contact, spray, wake, spells, destroyers,
+  gfx, scene: gfx.scene, rig, character, figure, wrecks, speeder, collision, contact, spray, wake, spells,
   overlay, touchControls, terrain, sky, shadows, post, depthPass,
-  audio, soundscape,
+  audio,
   S, input, perfStats: stats,
   captureShot,
   /** Fake a cannon burst at (x, z) — for testing the squad's reactions. */

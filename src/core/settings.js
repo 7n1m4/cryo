@@ -352,32 +352,7 @@ export const S = {
  speederClimbSpeed: 9.0,
  speederCeiling: 24.0,
 
- // ----------------------------------------------------------------- fleet
- /**
-  * The Imperial fleet on station: baked, shadowless, textureless Star
-  * Destroyers hung high over the bearing the walkers march in from. Set
-  * dressing — they hold formation relative to the player like the far
-  * mountains do, so the shot is always composed.
-  */
- showDestroyers: true,
- destroyerCount: 3,
- /** Metres above the field. */
- destroyerAlt: 1540,
- /** Metres out along the fleet bearing. */
- destroyerDist: 3200,
- /** Uniform scale on the ~1.5 km hull — forced perspective knob. */
- destroyerScale: 0.23,
- /** Degrees off the sun's azimuth (where the walkers come from). */
- destroyerBearing: 159,
- /** Formation heading, degrees — turns every hull's profile at once. */
- destroyerYaw: -103,
- /**
-  * The AI wingman: a second T-47 flying strafing runs on the walkers.
-  * Read at boot to decide whether the craft is built at all (like
-  * `speeder`); mid-session the toggle only hides it, and enabling it from
-  * off needs a reload.
-  */
- showWingman: true,
+
 
  /**
   * Draw a ring at every point a cannon bolt is born — walker chin guns and
@@ -612,19 +587,6 @@ export const SCHEMA = [
    { k: "flightThrottle", l: "Throttle flight", t: "b" },
    { k: "speederClimbSpeed", l: "Climb speed", t: "f", min: 2, max: 20, step: 0.5 },
    { k: "speederCeiling", l: "Flight ceiling", t: "f", min: 4, max: 40, step: 1 },
-  ],
- },
- {
-  group: "Fleet",
-  items: [
-   { k: "showDestroyers", l: "Star Destroyers", t: "b" },
-   { k: "destroyerCount", l: "Count", t: "f", min: 1, max: 3, step: 1 },
-   { k: "destroyerAlt", l: "Altitude", t: "f", min: 200, max: 2000, step: 10 },
-   { k: "destroyerDist", l: "Distance", t: "f", min: 800, max: 3600, step: 20 },
-   { k: "destroyerScale", l: "Scale", t: "f", min: 0.05, max: 1, step: 0.01 },
-   { k: "destroyerBearing", l: "Bearing", t: "f", min: -180, max: 180, step: 1 },
-   { k: "destroyerYaw", l: "Heading", t: "f", min: -180, max: 180, step: 1 },
-   { k: "showWingman", l: "Wingman (reload)", t: "b" },
   ],
  },
 

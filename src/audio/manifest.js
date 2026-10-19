@@ -200,7 +200,7 @@ export const AUDIO_MANIFEST = {
   needs: "speeder",
  },
 
- // The wingman going in: seven and a half seconds of one continuous event.
+ // Reserved for story mode: seven and a half seconds of one continuous event.
  //
  // This sample is not an impact, it is a *sequence* — the craft is hit, it
  // falls, it strikes the snow at t≈4.0 s, skips, and the final crash lands at
@@ -216,16 +216,13 @@ export const AUDIO_MANIFEST = {
  // so two wingmen dying a moment apart cannot smear their impacts across each
  // other into mush. The cost is that the second death is silent, and a silent
  // second death is better than two crashes landing on top of one another.
- //
- // `needs: "showWingman"` because this is the AI's crash specifically; with
- // the wingmen switched off nothing can ever fire it, so it should not even
- // be fetched.
+ // Reserved for story mode: no play site in this build. The sample is still
+ // fetched and decoded so story-mode code can call audio.play("speederCrash2").
  speederCrash2: {
   url: "audio/speeder-crash-2.mp3",
   bus: "sfx",
   gain: 0.95,
   minGap: 6,
-  needs: "showWingman",
  },
 
  // A speeder striking a walker's hull — a metal-on-metal impact, a second

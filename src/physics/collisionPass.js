@@ -35,7 +35,6 @@ import { S } from "../core/settings.js";
 import { input } from "../core/input.js";
 import { makeCapsulePool, sweptSphereVsCapsule, sweptSphereVsSphere } from "./colliders.js";
 import { speederImpactResponse } from "./impact.js";
-import { emitBurnTrail } from "../player/wingman.js";
 
 /** Craft collision sphere radius, metres. Deliberately under the T-47's
  *  half-width: a sphere is a fat proxy for a flat hull, and a hit the player
@@ -111,7 +110,7 @@ export class CollisionPass {
   *   activeCharacter?: (() => import("../character/controller.js").CharacterController|null) | null,
   *      // returns the controller the pass drives: ship while flying, on-foot otherwise
   *   speeder?: import("../player/speeder.js").Speeder|null,
-  *   wingmen?: import("../player/wingman.js").Wingman[]|null,
+  *   wingmen?: any[]|null,
   *   wrecks?: {ctl: any, active: boolean}[]|null,
  *   parked?: (() => {x:number,y:number,z:number}|null)|null,
   *   terrain?: import("../terrain/terrain.js").Terrain|null,
@@ -156,7 +155,7 @@ export class CollisionPass {
   // ------------------------------------------------------- the craft slots
   // One record per craft, player first. Prev positions live here — the
   // sweep needs where the craft *was*, and neither controller keeps it.
-  /** @type {{wing: import("../player/wingman.js").Wingman|null,
+  /** @type {{wing: any,
    *          has: boolean, prevX: number, prevY: number, prevZ: number,
    *          cx: number, cy: number, cz: number,
    *          mx: number, my: number, mz: number,
@@ -323,18 +322,9 @@ export class CollisionPass {
      s.cy = this.speeder.position.y;
      s.cz = c.position.z;
     }
-   } else {
-    const P = s.wing.pilot;
-    const on = S.showWingman !== false && !!P;
-    s.active = on;
-    s.downed = on && P.downed === true;
-    if (on) {
-     s.cx = P.position.x; s.cy = P.position.y; s.cz = P.position.z;
-    }
+    if (!s.active) { s.has = false; continue; }
    }
-   if (!s.active) { s.has = false; continue; }
    if (!s.has) {
-    // First frame (or first after a gap): no motion to sweep, but
     // the overlap branch still depenetrates a bad spawn.
     s.prevX = s.cx; s.prevY = s.cy; s.prevZ = s.cz;
     s.has = true;
@@ -450,8 +440,6 @@ export class CollisionPass {
   );
   if (s.wing === null) {
    if (res.severity !== "scrape") this._playerLadder(res.severity);
-  } else {
-   s.wing.collisionHit(res.severity, best.px, best.py, best.pz);
   }
  }
 
@@ -934,5 +922,33 @@ export class CollisionPass {
     );
    }
   }
+ }
+}
+export function emitBurnTrail(smoke, pos, facing, vel, withFire, vy = 0) {
+ const back = /** @type {number} */ (S.burnBackZ ?? 2.4);
+ const lift = /** @type {number} */ (S.burnY ?? 0.95);
+ const bx = pos.x - Math.sin(facing) * back;
+ const by = pos.y + lift;
+ const bz = pos.z - Math.cos(facing) * back;
+ const shade = withFire ? 0.045 : 0.09;
+ smoke.emit(
+  bx, by, bz,
+  vel.x * 0.22 + (Math.random() - 0.5) * 0.8,
+  1.1 + Math.random() * 0.6 + vy,
+  vel.z * 0.22 + (Math.random() - 0.5) * 0.8,
+  0.5 + Math.random() * 0.25, 1.7,
+  1.5 + Math.random() * 0.7,
+  shade, shade, shade, 0.55, true
+ );
+ if (withFire) {
+  smoke.emit(
+   bx, by - 0.25, bz,
+   vel.x * 0.72 + (Math.random() - 0.5) * 1.2,
+   0.9 + Math.random() * 0.8 + vy,
+   vel.z * 0.72 + (Math.random() - 0.5) * 1.2,
+   0.62 + Math.random() * 0.25, 1.4,
+   0.42 + Math.random() * 0.2,
+   3.2, 1.05, 0.26, 0.8, false
+  );
  }
 }
