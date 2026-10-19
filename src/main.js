@@ -14,7 +14,7 @@ import { S, onChange, applyPreset } from "./core/settings.js";
 import {
  sample, checkSpike, stats, mark, installDrawCounter, endFrameDraws,
 } from "./core/perf.js";
-import { initInput, pollInput, endFrame, input } from "./core/input.js";
+import { initInput, pollInput, endFrame, input, isDown } from "./core/input.js";
 import { CameraRig, expDamp } from "./core/camera.js";
 import { createGfx } from "./core/gfx.js";
 import { CharacterController } from "./character/controller.js";
@@ -134,6 +134,7 @@ async function boot() {
  // Only when it is actually going to fly. Off — which is the default — the
  // speeder costs nothing at all: no fetch, no decode, no pipeline.
  const FLYING = S.speeder === true;
+let flying = FLYING;
  // `srgbAlbedo` is deliberately *off*.
  //
  // The hull reading dark looked like an sRGB-decoded map being read as linear,
@@ -202,13 +203,20 @@ async function boot() {
  // composition (it frames the walkers); a craft's is simply where it points.
  if (S.speeder === true) rig.yaw = character.facing;
 
+/** @type {CharacterController|null} */
+const shipController = S.speeder === true ? new CharacterController(terrain) : null;
+if (shipController) {
+ shipController.position.copy(character.position);
+ shipController.facing = character.facing;
+}
+
  // The figure: skeleton, garment simulation, shell fur. Hidden while the
  // player is flying — it is still simulated, because the speeder reads the
  // same controller and the cloth solve costs a fraction of a millisecond, but
  // nothing draws it.
  const figure = new Character(gfx, terrain, sky, shadows, character);
  figure.registerPrepass(depthPass);
- const showFigure = () => figure.setVisible(S.showCharacter !== false && !FLYING);
+ const showFigure = () => figure.setVisible(S.showCharacter !== false && !flying);
  onChange("showCharacter", showFigure);
 
  // Airborne snow: footfall kick now, the surf plume and spell spray later.
@@ -226,7 +234,7 @@ async function boot() {
  // ------------------------------------------------------------ the speeder
  /** @type {Speeder|null} */
  const speeder = FLYING
-  ? new Speeder(gfx, terrain, sky, shadows, await speederReady, character, spray)
+  ? new Speeder(gfx, terrain, sky, shadows, await speederReady, shipController, spray)
   : null;
  speeder?.registerPrepass(depthPass);
 
@@ -303,6 +311,7 @@ async function boot() {
  // The graveyard hulls: one frozen Speeder per seat, posed by the crash
  // and left there. Built only when there are wingmen to lose.
  let wrecks = null;
+let leaveWreck = null;
  if (wingmen.length) {
   const speederAsset2 = await speederReady;
   wrecks = [];
@@ -341,7 +350,7 @@ async function boot() {
    * @param {number} x @param {number} z where it came to rest
    * @param {number} facing the yaw it was carrying
    */
-  const leaveWreck = (x, z, facing) => {
+  leaveWreck = (x, z, facing) => {
    const wk = wrecks[wreckNext];
    if (!wk) return;
    wreckNext = (wreckNext + 1) % wrecks.length;
@@ -616,10 +625,14 @@ async function boot() {
    const bx = character.position.x;
    const bz = character.position.z;
    const h = 0;
-   character.position.x = bx - Math.sin(h) * RESPAWN_OUT;
-   character.position.z = bz - Math.cos(h) * RESPAWN_OUT;
-   character.facing = h;
-   character.velocity.set(Math.sin(h) * 24, 0, Math.cos(h) * 24);
+   const sc = shipController || character;
+   sc.position.x = bx - Math.sin(h) * RESPAWN_OUT;
+   sc.position.z = bz - Math.cos(h) * RESPAWN_OUT;
+   sc.facing = h;
+   sc.velocity.set(Math.sin(h) * 24, 0, Math.cos(h) * 24);
+   character.position.copy(sc.position);
+   character.facing = sc.facing;
+   character.velocity.copy(sc.velocity);
    input.riseLevel = 3;
   },
   onWreck: (x, z, facing) => {
@@ -919,6 +932,40 @@ async function boot() {
   */
  let introFly = null;
 
+let prevToggleKey = false;
+const toggleMode = () => {
+ if (!speeder || !shipController) return;
+ if (flying) {
+  character.position.copy(shipController.position);
+  character.velocity.copy(shipController.velocity);
+  character.facing = shipController.facing;
+  terrain.heightfield.clampToPlayArea(character.position);
+  terrain.heightfield.clampToPlayArea(shipController.position);
+  flying = false;
+  speeder.setVisible(false);
+  showFigure();
+  // Restore walk gait state; ship velocity is too high for stepping.
+  character.surf = 0;
+  character.surfActive = false;
+  character.stepping = true;
+  character.gaitPhase = 0;
+  character.velocity.set(0, 0, 0);
+ } else {
+  shipController.position.copy(character.position);
+  shipController.velocity.copy(character.velocity);
+  shipController.facing = character.facing;
+  shipController.surf = 0;
+  shipController.surfActive = false;
+  shipController.stepping = true;
+  shipController.gaitPhase = 0;
+  terrain.heightfield.clampToPlayArea(shipController.position);
+  terrain.heightfield.clampToPlayArea(character.position);
+  flying = true;
+  speeder.setVisible(true);
+  figure.setVisible(false);
+ }
+};
+
  gfx.renderer.setAnimationLoop(() => {
   const now = performance.now();
   let dtMs = now - prev;
@@ -927,7 +974,13 @@ async function boot() {
   const dt = S.freezeTime ? 0 : dtMs / 1000;
   time += dt;
 
+  input.flying = flying;
   pollInput();
+
+  // Mode toggle: exit/enter the ship.
+  const toggleDown = isDown("KeyR");
+  if (toggleDown && !prevToggleKey) toggleMode();
+  prevToggleKey = toggleDown;
 
   // The opening hold: escorts overhead, Luke on the wire, stick frozen.
   // Movement only — the mouse still looks around, which is the point of
@@ -953,10 +1006,14 @@ async function boot() {
    if (introHold <= 0) {
     showFlightMsg("you have control", 2.6, true);
     if (S.speeder === true) {
-     const f = character.facing;
-     character.velocity.set(
+     const sc = shipController || character;
+     const f = sc.facing;
+     sc.velocity.set(
       Math.sin(f) * 16, 0, Math.cos(f) * 16
      );
+     character.position.copy(sc.position);
+     character.facing = sc.facing;
+     character.velocity.copy(sc.velocity);
     }
    }
    // The player's entrance: velocity fed straight into the
@@ -973,9 +1030,13 @@ async function boot() {
     } else {
      const v = Math.min(34, Math.max(12, remaining * 0.45));
      const h = introFly.heading;
-     character.velocity.set(
+     const sc = (S.speeder === true && flying && shipController) ? shipController : character;
+     sc.velocity.set(
       Math.sin(h) * v, 0, Math.cos(h) * v
      );
+     character.position.copy(sc.position);
+     character.facing = sc.facing;
+     character.velocity.copy(sc.velocity);
     }
    }
   }
@@ -991,7 +1052,23 @@ async function boot() {
   // the overlay's GPU row shows its dash and these rows stay `cpu`.
   const tFrame = performance.now();
 
-  character.update(dt, rig);
+  if (flying && shipController) {
+   shipController.update(dt, rig);
+   // Mirror into `character` so downstream camera/VFX code keeps working.
+   character.position.copy(shipController.position);
+   character.velocity.copy(shipController.velocity);
+   character.facing = shipController.facing;
+   character.speed01 = shipController.speed01;
+   character.lean = shipController.lean;
+   character.streak01 = shipController.streak01;
+   character.groundY = shipController.groundY;
+   character.groundNormal.copy(shipController.groundNormal);
+   character.surf = shipController.surf;
+   character.surfActive = shipController.surfActive;
+   character.crashing = shipController.crashing;
+  } else {
+   character.update(dt, rig);
+  }
   terrain.heightfield.clampToPlayArea(character.position);
   // Pose and simulate before the contact pass: the footprints are stamped
   // at the boot's actual planted position, which only exists once the
@@ -1038,8 +1115,10 @@ async function boot() {
    wk.hull.snowOverride = Math.min(1, wk.age / 150);
    wk.hull.update(dt);
   }
-  speeder?.tick(dt);
-  speeder?.update(dt);
+  if (flying) {
+   speeder?.tick(dt);
+   speeder?.update(dt);
+  }
   for (const w of wingmen) {
    w.tick(dt);
    w.update(dt);

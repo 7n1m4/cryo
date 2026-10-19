@@ -27,6 +27,7 @@ export const input = {
     // Zoom, consumed by the camera rig.
     zoomDelta: 0,
 
+    flying: false, // runtime: currently in speeder flight
     surf: false, // space or RMB held — the snow-surf slide
     fire: false, // the same two, when the player is flying rather than surfing
     sprint: false, // shift
@@ -223,7 +224,7 @@ export function pollInput() {
     if (keys.KeyD || keys.ArrowRight) x += 1;
     if (keys.KeyA || keys.ArrowLeft) x -= 1;
 
-    const flying = S.speeder !== false;
+    const flying = !!input.flying;
     const throttle = flying && S.flightThrottle === true;
 
     // Clamp to a unit disc so diagonals aren't faster. Not under the throttle
