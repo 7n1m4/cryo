@@ -878,7 +878,7 @@ export class CollisionPass {
     // what moves it, so this happens before the stage, never
     // leaving a hull to blink at the crash site for a frame.
     this.onRestart?.();
-    this.speeder?.setVisible?.(true);
+    // visibility is now managed by onRestart (strand vs respawn)
    }
   }
  }
