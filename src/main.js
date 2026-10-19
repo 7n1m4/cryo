@@ -133,6 +133,8 @@ async function boot() {
  // herd, AT-ST escort and trooper infantry were purged.
  // Only when it is actually going to fly. Off — which is the default — the
  // speeder costs nothing at all: no fetch, no decode, no pipeline.
+ // Build-time gate: whether this build includes the ship asset. NOT runtime mode.
+ // Runtime mode is the `flying` variable below, toggled live by toggleMode().
  const FLYING = S.speeder === true;
  let flying = FLYING;
  // `srgbAlbedo` is deliberately *off*.
@@ -666,7 +668,7 @@ async function boot() {
  const CROSSFIRE_AT = 165;
  let crossFired = false;
  const walkerFlyby = () => {
-  if (!speeder || S.speeder !== true) return;
+  if (!speeder) return;
 
   // Luke's second call, once a session: the player has closed on the
   // line. Held off until the opening hold has fully released and the
@@ -1023,8 +1025,8 @@ async function boot() {
    input.fire = false;
    if (introHold <= 0) {
     showFlightMsg("you have control", 2.6, true);
-    if (S.speeder === true) {
-     const sc = shipController || character;
+    if (shipController) {
+     const sc = shipController;
      const f = sc.facing;
      sc.velocity.set(
       Math.sin(f) * 16, 0, Math.cos(f) * 16
@@ -1048,7 +1050,7 @@ async function boot() {
     } else {
      const v = Math.min(34, Math.max(12, remaining * 0.45));
      const h = introFly.heading;
-     const sc = (S.speeder === true && flying && shipController) ? shipController : character;
+     const sc = shipController ?? character;
      sc.velocity.set(
       Math.sin(h) * v, 0, Math.cos(h) * v
      );

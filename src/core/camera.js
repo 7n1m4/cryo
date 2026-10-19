@@ -85,6 +85,7 @@ export class CameraRig {
   // speeder is read from above — you fly it by watching the snow come at
   // you — and the figure's shoulder-height framing put the horizon across
   // the middle of the hull.
+  // Build-time capability gate (S.speeder): camera framing for a ship build vs walk-only. Not runtime mode.
   this.pitch = S.speeder !== false ? 0.42 : 0.17;
 
   this.distance = S.speeder !== false ? 11.5 : 6.2;
