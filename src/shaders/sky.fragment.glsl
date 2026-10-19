@@ -16,6 +16,7 @@ uniform vec3 cameraPosition;
 uniform vec3 sunRadiance;
 uniform vec4 shR[9];
 uniform float ambientIntensity;
+uniform float auroraStrength;
 uniform float ridgeAmp;
 
 uniform float fogDensity;
@@ -84,9 +85,8 @@ void main() {
 
     // Deep-space base.
     float up = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
-    vec3 col = mix(vec3(0.02, 0.028, 0.055), vec3(0.005, 0.007, 0.015), up);
-    // faint tint
-    col += vec3(0.0, 0.004, 0.012) * (1.0 - up);
+    vec3 col = mix(vec3(0.05, 0.07, 0.12), vec3(0.015, 0.02, 0.04), up);
+    col += vec3(0.0, 0.01, 0.03) * (1.0 - up);
 
     // Sparse starfield.
     vec3 sp = dir * 180.0;
@@ -125,7 +125,7 @@ void main() {
     col += filCol * fil * 1.2;
 
     // Faint all-sky haze.
-    col += vec3(0.02, 0.03, 0.06) * 0.15;
+    col += vec3(0.04, 0.06, 0.10) * 0.35;
 
     // Far-field range.
     if (ridgeAmp > 1.0 && dir.y < 0.230 && dir.y > -0.050) {
@@ -133,6 +133,26 @@ void main() {
         if (hit.hit) {
             col = shadeRidge(hit, dir);
         }
+    }
+
+    // ---- aurora curtains (sky-only additive emission) --------------------
+    if (auroraStrength > 0.001) {
+        float phi = atan(dir.z, dir.x);
+        // gate to upper sky
+        float heightMask = smoothstep(0.05, 0.25, dir.y) * (1.0 - smoothstep(0.75, 0.95, dir.y));
+        // low-frequency banding into sheets
+        float band = noise3(vec3(phi * 1.6, dir.y * 0.8, time * 0.03));
+        band = smoothstep(0.15, 0.75, band * 0.5 + 0.5);
+        // fine vertical striation
+        float stri = noise3(vec3(phi * 18.0, dir.y * 3.0, time * 0.12));
+        stri = stri * 0.5 + 0.5;
+        // vertical falloff: bright base, faded top
+        float vert = smoothstep(0.0, 0.18, dir.y) * (1.0 - smoothstep(0.45, 0.85, dir.y));
+        float intensity = auroraStrength * heightMask * band * (0.55 + 0.45 * stri) * vert;
+        // colour: green dominant, upper red/violet edge
+        float edge = smoothstep(0.4, 0.8, dir.y);
+        vec3 auroraCol = mix(vec3(0.12, 0.95, 0.38), vec3(0.85, 0.25, 0.75), edge);
+        col += auroraCol * intensity * 1.6;
     }
 
     fragColor = vec4(col, 1.0);

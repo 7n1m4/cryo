@@ -1,0 +1,218 @@
+/**
+ * GPU helpers: material construction, fullscreen passes, and warm-up.
+ *
+ * In the Babylon build these existed because WebGPU compiles asynchronously
+ * and a material constructed on one line was not usable on the next. WebGL2
+ * compiles synchronously but janks instead, so the shape survives: everything
+ * still compiles behind the loading screen, via `renderer.compileAsync` (which
+ * rides `KHR_parallel_shader_compile` where present), and the 25 s labelled
+ * watchdog stays as the compile-error diagnostic it always was.
+ */
+
+import * as THREE from "three";
+import { composeShader } from "../shaders/registry.js";
+
+// --------------------------------------------------------------- makeMaterial
+
+/**
+ * The shader-body + uniforms contract every caller fills in.
+ */
+interface MaterialOpts {
+ /** Optional label; `mat.name` falls back to `""`. */
+ name?: string;
+ /** Raw GLSL ES 3.0 body (no `#version` line); chunks are resolved here. */
+ vertex: string;
+ /** Raw GLSL ES 3.0 body (no `#version` line); chunks are resolved here. */
+ fragment: string;
+ /** Named uniforms, passed straight through to the material. */
+ uniforms?: Record<string, { value: unknown }>;
+ /** Any other key becomes a `RawShaderMaterial` flag (transparent, depthWrite, side, …). */
+ [flag: string]: unknown;
+}
+
+/**
+ * Build a `RawShaderMaterial` with `#include<snowXxx>` chunks resolved.
+ */
+export function makeMaterial(opts: MaterialOpts) {
+ const { name, vertex, fragment, uniforms, ...flags } = opts;
+ const mat = new THREE.RawShaderMaterial({
+  glslVersion: THREE.GLSL3,
+  vertexShader: composeShader(vertex),
+  fragmentShader: composeShader(fragment),
+  uniforms: uniforms || {},
+  ...flags,
+ });
+ mat.name = name || "";
+ return mat;
+}
+
+// ------------------------------------------------------------ fullscreen pass
+
+/**
+ * One shared clip-space triangle (−1..3) for every fullscreen pass. `vUV` is
+ * in [0,1] over the viewport with v = 0 at the BOTTOM (GL convention) — the
+ * orientation every bake and post shader in this port assumes.
+ */
+let _triGeometry: THREE.BufferGeometry | null = null;
+
+function triGeometry() {
+ if (!_triGeometry) {
+  _triGeometry = new THREE.BufferGeometry();
+  _triGeometry.setAttribute(
+   "position",
+   new THREE.BufferAttribute(new Float32Array([-1, -1, 3, -1, -1, 3]), 2)
+  );
+  // The position here is 2D on purpose — it is already clip space — but
+  // three's bounds pass reads a z off every vertex regardless, gets
+  // `undefined` from a two-component attribute, and warns about a NaN
+  // radius on every boot. The triangle covers the screen by definition
+  // and is never culled, so give it bounds that say so.
+  _triGeometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+ }
+ return _triGeometry;
+}
+
+const FS_VERTEX = /* glsl */ `precision highp float;
+precision highp int;
+
+in vec2 position;
+out vec2 vUV;
+
+void main() {
+    vUV = position * 0.5 + vec2(0.5);
+    gl_Position = vec4(position, 0.0, 1.0);
+}
+`;
+
+export class FullscreenPass {
+ [key: string]: any;
+ /**
+  * @param {import("./gfx.js").Gfx} gfx
+  * @param {{name?: string, fragment: string, uniforms?: Record<string, {value:any}>}} opts
+  */
+ constructor(gfx: any, opts: any) {
+  this.gfx = gfx;
+  this.name = opts.name || "fullscreen";
+
+  this._material = new THREE.RawShaderMaterial({
+   glslVersion: THREE.GLSL3,
+   vertexShader: FS_VERTEX,
+   fragmentShader: composeShader(opts.fragment),
+   uniforms: opts.uniforms || {},
+   depthTest: false,
+   depthWrite: false,
+  });
+  this._material.name = this.name;
+
+  this._mesh = new THREE.Mesh(triGeometry(), this._material);
+  this._mesh.frustumCulled = false;
+  this._mesh.matrixAutoUpdate = false;
+
+  this._scene = new THREE.Scene();
+  this._scene.add(this._mesh);
+  this._camera = new THREE.Camera();
+ }
+
+ get material() {
+  return this._material;
+ }
+
+ /**
+  * Draw the triangle once into `target` (or the canvas when null).
+  * @param {THREE.WebGLRenderTarget|null} target
+  */
+ render(target: any) {
+  const r = this.gfx.renderer;
+  r.setRenderTarget(target || null);
+  r.render(this._scene, this._camera);
+ }
+}
+
+// -------------------------------------------------------------------- warm-up
+
+const WATCHDOG_MS = 25000;
+
+// Shared scaffolding for compiling a bare material.
+let _compileScene: THREE.Scene | null = null;
+/** @param {any} gfx @param {any} material */
+function compileMaterial(gfx: any, material: any) {
+ if (!_compileScene) _compileScene = new THREE.Scene();
+ const scene = _compileScene;
+ const mesh = new THREE.Mesh(triGeometry(), material);
+ mesh.frustumCulled = false;
+ mesh.matrixAutoUpdate = false;
+ scene.add(mesh);
+ return gfx.renderer
+  .compileAsync(scene, gfx.threeCamera)
+  .finally(() => scene.remove(mesh));
+}
+
+/**
+ * Compile whatever `materialOrPass` is, behind a labelled 25 s watchdog.
+ *
+ * Accepts a `FullscreenPass`, a raw material, or any object carrying a
+ * `.material` (a subsystem pass wrapper). When `drawFn` is given it is awaited
+ * instead — for passes whose compilation needs a real draw.
+ *
+ * @param {import("./gfx.js").Gfx} gfx
+ * @param {any} materialOrPass
+ * @param {string} label used in the timeout message
+ * @param {() => any} [drawFn]
+ * @returns {Promise<void>}
+ */
+export function whenReady(gfx: any, materialOrPass: any, label: any, drawFn?: () => unknown) {
+ // DOM lib returns a number from setTimeout; node's typings return a Timeout.
+ // `window.setTimeout` is the browser call this actually makes, so number.
+ let timer: number | null = null;
+ const watchdog = new Promise((_resolve, reject) => {
+  timer = setTimeout(() => {
+   reject(new Error(
+    label + " never became ready after 25s — " +
+    "almost always a GLSL compile error; check the console."
+   ));
+  }, WATCHDOG_MS);
+ });
+
+ const work = (async () => {
+  if (drawFn) {
+   await drawFn();
+   return;
+  }
+  const obj = materialOrPass;
+  if (!obj) return;
+  if (obj instanceof FullscreenPass) {
+   await gfx.renderer.compileAsync(obj._scene, obj._camera);
+   return;
+  }
+  if (obj.isMaterial) {
+   await compileMaterial(gfx, obj);
+   return;
+  }
+  if (obj.material && obj.material.isMaterial) {
+   await compileMaterial(gfx, obj.material);
+   return;
+  }
+  // Nothing compilable — a stub peer. Tolerated (G1).
+ })();
+
+ return Promise.race([work, watchdog]).finally(() => clearTimeout(timer as number | undefined));
+}
+
+/**
+ * The bake pattern: compile a fullscreen pass, then render it exactly once.
+ * @param {FullscreenPass} pass
+ * @param {THREE.WebGLRenderTarget|null} target
+ * @param {string} [label]
+ */
+export async function bakeOnce(pass: any, target: any, label: any) {
+ await whenReady(pass.gfx, pass, label || pass.name);
+ pass.render(target);
+}
+
+/**
+ * Compile every material currently in the main scene.
+ * @param {import("./gfx.js").Gfx} gfx
+ */
+export function compileAll(gfx: any) {
+ return gfx.renderer.compileAsync(gfx.scene, gfx.threeCamera);
+}
