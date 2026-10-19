@@ -21,7 +21,7 @@ import { CharacterController } from "./character/controller.js";
 import { Character } from "./character/character.js";
 import { SnowContact } from "./character/snowContact.js";
 import { SprayField } from "./vfx/particles.js";
-import { Explosions } from "./vfx/explosion.js";
+
 import { MuzzleMarkers } from "./vfx/muzzleMarkers.js";
 import { SmokeTrails } from "./vfx/smokeTrails.js";
 import { SurfWake } from "./vfx/surfWake.js";
@@ -134,7 +134,7 @@ async function boot() {
  // Only when it is actually going to fly. Off — which is the default — the
  // speeder costs nothing at all: no fetch, no decode, no pipeline.
  const FLYING = S.speeder === true;
-let flying = FLYING;
+ let flying = FLYING;
  // `srgbAlbedo` is deliberately *off*.
  //
  // The hull reading dark looked like an sRGB-decoded map being read as linear,
@@ -203,12 +203,12 @@ let flying = FLYING;
  // composition (it frames the walkers); a craft's is simply where it points.
  if (S.speeder === true) rig.yaw = character.facing;
 
-/** @type {CharacterController|null} */
-const shipController = S.speeder === true ? new CharacterController(terrain) : null;
-if (shipController) {
- shipController.position.copy(character.position);
- shipController.facing = character.facing;
-}
+ /** @type {CharacterController|null} */
+ const shipController = S.speeder === true ? new CharacterController(terrain) : null;
+ if (shipController) {
+  shipController.position.copy(character.position);
+  shipController.facing = character.facing;
+ }
 
  // The figure: skeleton, garment simulation, shell fur. Hidden while the
  // player is flying — it is still simulated, because the speeder reads the
@@ -221,9 +221,6 @@ if (shipController) {
 
  // Airborne snow: footfall kick now, the surf plume and spell spray later.
  const spray = new SprayField(gfx, terrain, sky, shadows);
- // Shellbursts where the cannon fire lands close to the fight — the Hoth
- // fireball, gated and rationed. See `vfx/explosion.js` for the economy.
- const explosions = new Explosions(gfx, terrain, sky, []);
  // Tuning rings on the gun heads, live under the overlay's muzzle sliders.
  const muzzleMarkers = new MuzzleMarkers(gfx);
  muzzleMarkers.bindCamera(rig.camera.viewProjection);
@@ -279,29 +276,6 @@ if (shipController) {
  // The get-up starts five and a half seconds in: Mixamo's clip spends its
  // first act lying still and rolling over, and a soldier who dove clear of
  // a shellburst stirs and rises rather than napping through the battle.
- const GETUP_SKIP = 5.5;
- const DEATHS = ["death1", "death2", "death3"];
- // The same impacts, one more listener: a qualifying burst sometimes
- // blossoms into a fireball. Chained over whatever handler is installed
- // rather than replacing it — the crater, the spray and the flinching
- // squad all still belong to the bolts and the handler above.
- const chainBurst = (bolts, anywhere) => {
-  if (!bolts) return;
-  const prev = bolts.ctx.onImpact;
-  bolts.ctx.onImpact = (x, y, z) => {
-   prev?.(x, y, z);
-   explosions.impact(x, y, z, anywhere);
-  };
- };
- for (const w of wingmen) chainBurst(w.craft?.bolts, false);
- // The player's own guns blossom wherever they land — a deliberate shot
- // into the snow that does nothing reads as a misfire.
- chainBurst(speeder?.bolts, true);
- // And the AT-ATs' artillery: their shells land around the *player*, far
- // from anything the proximity gate watches, so they ride the same
- // always-blossom path — incoming fire that bursts into flame is most of
- // what makes the walk toward the line feel like a bombardment. The
- // AT-STs' slim chin guns stay a kick of snow; a scout is not artillery.
  // Walkers purged: no AT-AT/AT-ST bolt chains remain.
 
  // The wingmen can be shot down — by the *Imperial* guns only. Three hits,
@@ -311,7 +285,7 @@ if (shipController) {
  // The graveyard hulls: one frozen Speeder per seat, posed by the crash
  // and left there. Built only when there are wingmen to lose.
  let wrecks = null;
-let leaveWreck = null;
+ let leaveWreck = null;
  if (wingmen.length) {
   const speederAsset2 = await speederReady;
   wrecks = [];
@@ -408,7 +382,6 @@ let leaveWreck = null;
    // actually touches the snow; delaying it or restarting it at the
    // ground would smear the whole sequence out of sync.
    onKillHit: (x, y, z) => {
-    explosions.impact(x, y - 2.4, z, true, true);
     // The cannon distance model, to the letter: linear to nothing
     // at 420 m, CUBED so it does not read as loud from across the
     // battle line, and 343 m/s of honest travel time on top.
@@ -437,8 +410,8 @@ let leaveWreck = null;
     *
     * Everything the crash does, one size down and one register
     * quieter: the same plume-and-ring splash shape, a short shallow
-    * gouge along the skid line, a small dirty puff. Deliberately NO
-    * explosion — the airframe is still whole, it is only touching —
+    * gouge along the skid line, a small dirty puff. Deliberately no
+    * visual burst — the airframe is still whole, it is only touching —
     * and deliberately NO sound: `speeder-crash-2.mp3` has this exact
     * impact baked into it at 4.0 s and has been playing since the
     * killing hit, so anything fired here would double it.
@@ -503,7 +476,6 @@ let leaveWreck = null;
     }
    },
    onCrash: (x, y, z, facing) => {
-    explosions.impact(x, y, z, true, true);
     // No report here on purpose. `speederCrash2` started at the
     // killing hit and its own timeline reaches the final crash at
     // 5.5 s, which is this frame — a second sample fired now would
@@ -606,8 +578,17 @@ let leaveWreck = null;
  // S.collisions; every collaborator is optional, so a boot without a
  // speeder or without wingmen runs the parts it has.
  const collision = new CollisionPass({
-  character, speeder, wingmen,
-  wrecks, terrain, explosions, spray, smoke, rig, audio, troopers: null,
+  character,
+  activeCharacter: () => (flying && shipController) ? shipController : character,
+  speeder, wingmen,
+  wrecks, terrain, spray, smoke, rig, audio, troopers: null,
+  parked: () => {
+   if (flying || !speeder) return null;
+   const dx = character.position.x - speeder.position.x;
+   const dz = character.position.z - speeder.position.z;
+   if (dx * dx + dz * dz < 3.5 * 3.5) return null;
+   return speeder.position;
+  },
   squadImpact: (x, z) => squadImpact(x, 0, z),
   // Where the player's own crash ends up, and what happens after it.
   // Back in the air where the fight is, and flying immediately.
@@ -710,11 +691,12 @@ let leaveWreck = null;
  // The five spells, the water body they bend and the ice they leave.
  // Flying hides the whole snowboarding half of the demo: the spells are cast
  // by a figure that is not there, and the surf wake is thrown by a board.
- // Plain writes, not `set()` — no listeners fire.
- if (FLYING) {
-  S.showSpells = false;
-  S.showWake = false;
- }
+ /** The figure's half of the demo is inert while the player is in the ship. */
+ const applyModeExtras = () => {
+  S.showSpells = !flying;
+  S.showWake = !flying;
+ };
+ applyModeExtras();
 
  const spells = new SpellSystem(
   gfx, sky, shadows, terrain, character, figure.figure, rig, spray
@@ -860,7 +842,6 @@ let leaveWreck = null;
  for (const w of wingmen) await w.warmUp();
  spray.update(0, rig.camera.position);
  await spray.warmUp();
- await explosions.warmUp();
  await wake.warmUp();
  await spells.warmUp(
   character.position.x + 3, character.position.y, character.position.z + 3
@@ -932,39 +913,76 @@ let leaveWreck = null;
   */
  let introFly = null;
 
-let prevToggleKey = false;
-const toggleMode = () => {
- if (!speeder || !shipController) return;
- if (flying) {
-  character.position.copy(shipController.position);
-  character.velocity.copy(shipController.velocity);
-  character.facing = shipController.facing;
-  terrain.heightfield.clampToPlayArea(character.position);
-  terrain.heightfield.clampToPlayArea(shipController.position);
-  flying = false;
-  speeder.setVisible(false);
-  showFigure();
-  // Restore walk gait state; ship velocity is too high for stepping.
-  character.surf = 0;
-  character.surfActive = false;
-  character.stepping = true;
-  character.gaitPhase = 0;
-  character.velocity.set(0, 0, 0);
- } else {
-  shipController.position.copy(character.position);
-  shipController.velocity.copy(character.velocity);
-  shipController.facing = character.facing;
-  shipController.surf = 0;
-  shipController.surfActive = false;
-  shipController.stepping = true;
-  shipController.gaitPhase = 0;
-  terrain.heightfield.clampToPlayArea(shipController.position);
-  terrain.heightfield.clampToPlayArea(character.position);
-  flying = true;
-  speeder.setVisible(true);
-  figure.setVisible(false);
- }
-};
+ let prevToggleKey = false;
+ const toggleMode = () => {
+  if (!speeder || !shipController) return;
+  if (flying) {
+   character.position.copy(shipController.position);
+   character.facing = shipController.facing;
+   terrain.heightfield.clampToPlayArea(character.position);
+   terrain.heightfield.clampToPlayArea(shipController.position);
+   flying = false;
+   speeder.setVisible(true);
+   speeder.grounded = false;
+   showFigure();
+   // Ground the figure at the surface instead of hover height.
+   character.position.y = terrain.heightAt(character.position.x, character.position.z);
+   character.groundY = character.position.y;
+   character.velocity.y = 0;
+   // Restore walk gait state; ship velocity is too high for stepping.
+   character.surf = 0;
+   character.surfActive = false;
+   character.stepping = true;
+   character.gaitPhase = 0;
+   character.velocity.set(0, 0, 0);
+   character.speed = 0; character.speed01 = 0; character.speedRaw = 0;
+   character.lean = 0; character.streak01 = 0; character.carve = 0;
+   character.crashing = false; character.crashLanded = false; character.crashDown = false;
+   character.terrainSlam = null;
+   character.cast = 0; character.castAimX = 0; character.castAimY = 0; character.castAimZ = 0;
+   character.pathY = 0; character.lift01 = 0; character.impactSpin = 0;
+   character.acceleration.set(0, 0, 0);
+   character.footfall = false; character.footImpact = 0;
+  } else {
+   shipController.position.copy(character.position);
+   shipController.velocity.copy(character.velocity);
+   shipController.facing = character.facing;
+   shipController.surf = 0;
+   shipController.surfActive = false;
+   shipController.stepping = true;
+   shipController.gaitPhase = 0;
+   shipController.cast = 0;
+   shipController.impactSpin = 0;
+   shipController.stepping = true;
+   shipController._prevSpeed = 0;
+   shipController._drive = 0;
+   shipController._boost = 1;
+   shipController._climb = S.speeder !== false ? Math.max(0, S.speederClimbMax || 0) : 0;
+   shipController._climbWant = shipController._climb;
+   shipController._vertEase = 0;
+   shipController.climbRate = 0;
+   shipController._cruiseGround = NaN;
+   shipController.steer = 0;
+   shipController.steerRate = 0;
+   shipController.controlScramble = 0;
+   shipController._scrambleMax = 0;
+   shipController._scrambleT = 0;
+   shipController.fireHeld = undefined;
+   shipController.driveHeld = undefined;
+   shipController.boostHeld = undefined;
+   shipController._prevTargetY = NaN;
+   shipController._slam = { closing: 0, nx: 0, nz: 0 };
+   shipController.speed = 0;
+   shipController.carve = 0;
+   shipController.terrainSlam = null;
+   terrain.heightfield.clampToPlayArea(shipController.position);
+   terrain.heightfield.clampToPlayArea(character.position);
+   flying = true;
+   speeder.setVisible(true);
+   figure.setVisible(false);
+  }
+  applyModeExtras();
+ };
 
  gfx.renderer.setAnimationLoop(() => {
   const now = performance.now();
@@ -1054,19 +1072,64 @@ const toggleMode = () => {
 
   if (flying && shipController) {
    shipController.update(dt, rig);
-   // Mirror into `character` so downstream camera/VFX code keeps working.
+   // Mirror into `character` so downstream camera/VFX/sound code keeps working.
    character.position.copy(shipController.position);
    character.velocity.copy(shipController.velocity);
+   character.prevVelocity.copy(shipController.prevVelocity);
+   character.acceleration.copy(shipController.acceleration);
    character.facing = shipController.facing;
+   character.speed = shipController.speed;
    character.speed01 = shipController.speed01;
+   character.speedRaw = shipController.speedRaw;
    character.lean = shipController.lean;
+   character.carve = shipController.carve;
    character.streak01 = shipController.streak01;
    character.groundY = shipController.groundY;
    character.groundNormal.copy(shipController.groundNormal);
    character.surf = shipController.surf;
    character.surfActive = shipController.surfActive;
    character.crashing = shipController.crashing;
+   character.crashLanded = shipController.crashLanded;
+   character.crashDown = shipController.crashDown;
+   character._crashT = shipController._crashT;
+   character.terrainSlam = shipController.terrainSlam;
+   character.pathY = shipController.pathY;
+   character.lift01 = shipController.lift01;
+   character.impactSpin = shipController.impactSpin;
+   character.cast = shipController.cast;
+   character.castAimX = shipController.castAimX;
+   character.castAimY = shipController.castAimY;
+   character.castAimZ = shipController.castAimZ;
+   character.stepping = shipController.stepping;
+   character.gaitPhase = shipController.gaitPhase;
+   character.footfall = shipController.footfall;
+   character.footIndex = shipController.footIndex;
+   character.footPos.copy(shipController.footPos);
+   // Presentation mirror: `character` is a view of the authoritative
+   // shipController while flying. Keep this list in sync with the
+   // CharacterController constructor field set.
+   character._prevSpeed = shipController._prevSpeed;
+   character._drive = shipController._drive;
+   character._boost = shipController._boost;
+   character._climb = shipController._climb;
+   character._climbWant = shipController._climbWant;
+   character._vertEase = shipController._vertEase;
+   character.climb = shipController.climb;
+   character.climbRate = shipController.climbRate;
+   character._cruiseGround = shipController._cruiseGround;
+   character.steer = shipController.steer;
+   character.steerRate = shipController.steerRate;
+   character.controlScramble = shipController.controlScramble;
+   character._scrambleMax = shipController._scrambleMax;
+   character._scrambleT = shipController._scrambleT;
+   character.fireHeld = shipController.fireHeld;
+   character.driveHeld = shipController.driveHeld;
+   character.boostHeld = shipController.boostHeld;
+   character._prevTargetY = shipController._prevTargetY;
+   character._slam = shipController._slam;
+   character.footImpact = shipController.footImpact;
   } else {
+   character.footfall = false;
    character.update(dt, rig);
   }
   terrain.heightfield.clampToPlayArea(character.position);
@@ -1129,6 +1192,8 @@ const toggleMode = () => {
   // the contact point it reads is this frame's, not last frame's.
   pumpBounces();
   // After every craft has moved, before the rig frames the result: the
+  // Collision pass works on whichever controller is actually driving this frame.
+  collision.character = (flying && shipController) ? shipController : character;
   // contacts this frame's motion earned, resolved and reacted to.
   collision.update(dt);
   const tChar = performance.now();
@@ -1142,7 +1207,7 @@ const toggleMode = () => {
   // while the world turns around it — turning the wreck instead would
   // spin it like a bottle. The bank is zeroed too: the roll belongs to
   // the falling craft, not to the camera watching it.
-  let camFacing = speeder ? character.facing : null;
+  let camFacing = flying ? character.facing : null;
   let camLean = character.lean;
   let camTarget = character.position;
   if (character.crashing) {
@@ -1183,7 +1248,7 @@ const toggleMode = () => {
   // Flying, the rig is handed the craft's heading and chases it itself —
   // see CameraRig.update — rather than the controller stepping rig.yaw.
   rig.update(
-   dt, camTarget, _vel, camLean, character.speed01, camFacing
+   dt, camTarget, _vel, camLean, character.speed01, camFacing, character.facing
   );
 
   // Jitters the projection and republishes everything the screen-space
@@ -1192,7 +1257,7 @@ const toggleMode = () => {
   // and the beauty pass both do.
   // The craft's streak when there is a craft: see `Speeder.streak01` for
   // why the character's is the wrong signal in the air.
-  post.update(dt, speeder ? speeder.streak01 : character.streak01, rig.distance);
+  post.update(dt, (speeder && flying) ? speeder.streak01 : character.streak01, rig.distance);
   sky.update();
   sky.render(rig, time);
   shadows.update(rig.camera, sky.sunDir);
@@ -1230,7 +1295,7 @@ const toggleMode = () => {
   // The overlay's burn preview: the wingmen's damage trail, lit on the
   // player craft so the burn sliders can be dialled against a hull the
   // player can actually orbit.
-  if (S.burnPreview && speeder) {
+  if (S.burnPreview && speeder && flying) {
    burnPreviewT -= dt;
    if (burnPreviewT <= 0) {
     burnPreviewT = 0.05;
@@ -1243,7 +1308,6 @@ const toggleMode = () => {
    }
   }
   smoke.update(dt, rig.camera.position);
-  explosions.update(dt, rig.camera.position);
   const tVfx = performance.now();
 
   // Last, and a pure reader: every signal it mixes on — surf blend, carve
@@ -1266,7 +1330,7 @@ const toggleMode = () => {
   endFrameDraws();
   stats.triangles =
    (terrain.mesh && terrain.mesh.metadata ? terrain.mesh.metadata.triangles : 0) +
-   (S.showCharacter && !FLYING ? figure.triangles : 0) +
+   (S.showCharacter && !flying ? figure.triangles : 0) +
    (speeder ? speeder.triangles : 0) +
    wingmen.reduce((t, w) => t + w.triangles, 0) +
    // walkers/herds purged: no triangle counts.
@@ -1333,7 +1397,7 @@ const toggleMode = () => {
  setTimeout(() => overlay.resetSpikes(), 800);
 
  globalThis.SNOWFLOW = {
-  gfx, scene: gfx.scene, rig, character, figure, wrecks, speeder, wingman, wingmen, collision, contact, spray, wake, spells, destroyers, explosions,
+  gfx, scene: gfx.scene, rig, character, figure, wrecks, speeder, wingman, wingmen, collision, contact, spray, wake, spells, destroyers,
   overlay, touchControls, terrain, sky, shadows, post, depthPass,
   audio, soundscape,
   S, input, perfStats: stats,

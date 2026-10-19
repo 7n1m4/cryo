@@ -428,8 +428,8 @@ export class Speeder {
   this.mesh.visible = this._visible;
   // A wreck's repulsors are dead: no plume, however visible the hull.
   this.jet.setVisible(this._visible && !this.grounded);
-  if (!this._visible && this.bolts && this.bolts.mesh) {
-   this.bolts.mesh.visible = false;
+  if (this.bolts && this.bolts.mesh) {
+   this.bolts.mesh.visible = this._visible;
   }
  }
 

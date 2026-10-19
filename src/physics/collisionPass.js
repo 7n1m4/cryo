@@ -108,12 +108,13 @@ function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 export class CollisionPass {
  /**
   * @param {{
-  *   character?: import("../character/controller.js").CharacterController|null,
+  *   activeCharacter?: (() => import("../character/controller.js").CharacterController|null) | null,
+  *      // returns the controller the pass drives: ship while flying, on-foot otherwise
   *   speeder?: import("../player/speeder.js").Speeder|null,
   *   wingmen?: import("../player/wingman.js").Wingman[]|null,
   *   wrecks?: {ctl: any, active: boolean}[]|null,
+ *   parked?: (() => {x:number,y:number,z:number}|null)|null,
   *   terrain?: import("../terrain/terrain.js").Terrain|null,
-  *   explosions?: import("../vfx/explosion.js").Explosions|null,
   *   spray?: import("../vfx/particles.js").SprayField|null,
   *   smoke?: import("../vfx/smokeTrails.js").SmokeTrails|null,
   *   rig?: import("../core/camera.js").CameraRig|null,
@@ -126,11 +127,12 @@ export class CollisionPass {
   */
  constructor(ctx) {
   this.character = ctx.character ?? null;
+  this._activeCharacter = ctx.activeCharacter ?? (() => this.character);
   this.speeder = ctx.speeder ?? null;
   this.wingmen = ctx.wingmen ?? [];
   this.wrecks = ctx.wrecks ?? [];
+  this.parked = ctx.parked ?? null;
   this.terrain = ctx.terrain ?? null;
-  this.explosions = ctx.explosions ?? null;
   this.spray = ctx.spray ?? null;
   this.smoke = ctx.smoke ?? null;
   this.rig = ctx.rig ?? null;
@@ -148,6 +150,7 @@ export class CollisionPass {
   // slack — nothing grows after this line.
   let cap = 8;
   cap += this.wrecks.length;
+  if (this.parked) cap += 1;
   this.pool = makeCapsulePool(cap);
 
   // ------------------------------------------------------- the craft slots
@@ -278,6 +281,18 @@ export class CollisionPass {
    c.walker = wk;
    c.live = true;
   }
+  if (this.parked && k < pool.length) {
+   const p = this.parked();
+   if (p) {
+    const c = pool[k++];
+    c.ax = p.x; c.ay = p.y - 1.0; c.az = p.z;
+    c.bx = p.x; c.by = p.y + 2.0; c.bz = p.z;
+    c.r = 2.0;
+    c.kind = "wreck";
+    c.walker = null;
+    c.live = true;
+   }
+  }
   for (let i = k; i < pool.length; i++) pool[i].live = false;
  }
 
@@ -287,7 +302,7 @@ export class CollisionPass {
    if (s.wing === null) {
     // The player's sphere rides the controller's XZ and the drawn
     // hull's Y — the hover ease is what the eye sees hit things.
-    const c = this.character;
+    const c = this._activeCharacter();
     const on = !!c && !!this.speeder && S.speeder === true && c.surf > 0.5;
     s.active = on;
     // Mid-crash the craft is the fall's, exactly as a downed
@@ -363,7 +378,7 @@ export class CollisionPass {
   }
   if (!found) return;
 
-  const ctl = s.wing ? s.wing.pilot : this.character;
+  const ctl = s.wing ? s.wing.pilot : this._activeCharacter();
   const vel = ctl.velocity;
 
   // Both craft own their own height — the hover floor and the climb
@@ -472,9 +487,8 @@ export class CollisionPass {
    a.mx - b.mx, a.my - b.my, a.mz - b.mz,
    b.prevX, b.prevY, b.prevZ, CRAFT_R, CRAFT_R, hit
   )) return;
-
-  const ctlA = a.wing ? a.wing.pilot : this.character;
-  const ctlB = b.wing ? b.wing.pilot : this.character;
+  const ctlA = a.wing ? a.wing.pilot : this._activeCharacter();
+  const ctlB = b.wing ? b.wing.pilot : this._activeCharacter();
 
   // Horizontal normal away from B toward A.
   let nx = hit.nx, nz = hit.nz;
@@ -626,7 +640,6 @@ export class CollisionPass {
    // recording twice in one frame. The metal strike stays: armour
    // rings first, then the fuel goes.
    const trips = isPlayer && this._pBurnT <= 0;
-   if (!trips) this.explosions?.impact(px, py - 2.4, pz, true, true);
    if (hull) this._bang(px, pz, HULL_SFX_GAIN.crash, 1.0, "speederHitWalker");
    else if (!trips) this._bang(px, pz, 1.0, 1.0);
   }
@@ -712,7 +725,7 @@ export class CollisionPass {
   * player's ladder like any other crash.
   */
  _terrainSlam() {
-  const c = this.character;
+  const c = this._activeCharacter();
   const slam = c?.terrainSlam;
   if (!slam || !this.speeder || S.speeder !== true) return;
   const sev = slam.closing > S.impactCrash ? "crash"
@@ -756,14 +769,13 @@ export class CollisionPass {
   * up from the landing.
   */
  _trip() {
-  const c = this.character;
+  const c = this._activeCharacter();
   this._pDamage = 3;
   this._pBurnT = PLAYER_BURN;
   this._pGrace = PLAYER_GRACE;
   // The burst volume centres LIFT above the point it is given, so the
   // y is walked down to land it at hull height — same as `onKillHit`.
   const hull = this.speeder ? this.speeder.position : c?.position;
-  if (hull) this.explosions?.impact(hull.x, hull.y - 2.4, hull.z, true, true);
   // The crash, whole, fired once here at the top of the fall.
   //
   // `speeder-crash-3.mp3` is not a report — it is a timeline, with its
@@ -799,7 +811,7 @@ export class CollisionPass {
   * @param {number} h clamped seconds
   */
  _playerCrash(h) {
-  const c = this.character;
+  const c = this._activeCharacter();
   if (!c) return;
 
   if (c.crashLanded && this._pRecover <= 0) {
@@ -809,7 +821,6 @@ export class CollisionPass {
    const y = (this.terrain?.heightAt(x, z) ?? c.position.y);
    const facing = c.facing;
 
-   this.explosions?.impact(x, y, z, true, true);
    // No report here — see `_trip`. The crash sample started at the
    // top of the fall and its own impact is landing on this frame.
    this.rig?.addTrauma(1);
@@ -902,7 +913,7 @@ export class CollisionPass {
   // the full twenty seconds from a hull that was hidden and stationary
   // — a fireball climbing out of the snow beside the body, which is
   // exactly what the crash camera is pointed at.
-  const crashing = this.character?.crashing || this._pRecover > 0;
+  const crashing = this._activeCharacter()?.crashing || this._pRecover > 0;
   if (!crashing && this._pDamage >= 1 && this.smoke && this.speeder
    && this.character) {
    this._pPuffT -= h;
@@ -917,8 +928,8 @@ export class CollisionPass {
     const vy = (hy - (this._burnPrevY ?? hy)) / 0.05;
     this._burnPrevY = hy;
     emitBurnTrail(
-     this.smoke, this.speeder.position, this.character.facing,
-     this.character.velocity, this._pDamage >= 2,
+     this.smoke, this.speeder.position, this._activeCharacter().facing,
+     this._activeCharacter().velocity, this._pDamage >= 2,
      Math.max(-14, Math.min(0, vy))
     );
    }

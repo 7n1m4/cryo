@@ -28,6 +28,7 @@
  */
 
 import { S } from "../core/settings.js";
+import { input } from "../core/input.js";
 
 /** |carve| that counts as a real edge rather than a steering correction. */
 const TURN_GATE = 0.4;
@@ -291,7 +292,7 @@ export class Soundscape {
   // the throttle, because a repulsorlift has no gears to shift and nothing
   // else about it changes.
   if (this.jet) {
-   const flying = S.speeder !== false;
+   const flying = input.flying;
    const sp = flying ? Math.min(1, c.speed01) : 0;
    this.jet.set(flying ? 0.34 + 0.66 * sp : 0, 0.25);
    this.jet.setRate(0.82 + 0.36 * sp);
@@ -307,7 +308,7 @@ export class Soundscape {
    // Silent in the speeder. The controller is permanently in its slide
    // mode there — that is what gives the craft its motion — but nothing
    // is touching the snow, so the board loop has nothing to describe.
-   const amt = S.speeder !== false ? 0 : c.surf * rolling;
+   const amt = input.flying ? 0 : c.surf * rolling;
    this.slideLoop.set(amt * (0.4 + 0.6 * c.speed01));
    // Just under an octave across the speed range. More than this and it
    // stops reading as snow and starts reading as a tape machine.
@@ -323,7 +324,7 @@ export class Soundscape {
   const lag = c.position.y - c.groundY;
   // Silent in the speeder. The lines are a snowboarder catching air; a
   // pilot whooping every time the craft crests a dune is a different demo.
-  if (S.speeder === false && c.surf > 0.5 && c.speed01 > AIR_SPEED && lag > AIR_LAG) {
+  if (!input.flying && c.surf > 0.5 && c.speed01 > AIR_SPEED && lag > AIR_LAG) {
    // Edge-triggered on the launch, not held: one line per air, however
    // long the air lasts.
    if (!this._airArmed) {
