@@ -270,7 +270,7 @@ async function loadLayers(
 
  const canvas = new OffscreenCanvas(size, size);
  const ctx = canvas.getContext("2d", { willReadFrequently: true });
- if (!ctx) throw new Error("no ctx");
+ if (!ctx) throw new Error(`no 2D context on the OffscreenCanvas (${size}×${size}) — cannot decode model textures; this environment does not support OffscreenCanvas 2D, so use a browser that does (or serve the asset as pre-decoded image bitmaps).`);
 
  await Promise.all(materials.map(async (m: WalkerMaterial) => {
   const key = kind === "albedo" ? "albedoImage" : "ormImage";

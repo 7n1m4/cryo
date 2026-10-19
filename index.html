@@ -45,10 +45,9 @@
         --frost-dim:#7d8ea3;
         --accent:   #8fc4e8;
 
-        /* Layer stack, named so the numbers stay in one readable row.
+        /* Layer stack, named so the numbers stay in one readable row:
             100 boot overlay, 120 source link above it, 200 hard-failure
-            screen above everything, 50 the HUD rows over the canvas. */
-        --z-hud:    50;
+            screen above everything. */
         --z-boot:   100;
         --z-source: 120;
         --z-nogpu:  200;
@@ -62,10 +61,10 @@
         overflow: hidden;
         background: var(--ink);
         color: var(--frost);
-        /* No Inter, no system-ui default face: the display type here is the
-           site's own — a humanist sans that exists on the machines that matter,
-           with a generic family as the last word rather than a UI default. */
-        font-family: "Optima", "Palatino Linotype", "Palatino", "Book Antiqua", Georgia, serif;
+        /* The display type is the site's own: a humanist sans that exists on
+           the machines that matter, with a plain generic as the last word
+           rather than a UI default. */
+        font-family: "Avenir Next", "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
         -webkit-font-smoothing: antialiased;
     }
 
@@ -91,7 +90,7 @@
     #boot {
         position: fixed;
         inset: 0;
-        z-index: 100;
+        z-index: var(--z-boot);
         display: grid;
         place-items: center;
         /* The simulation's own shot — speeder, walkers, the fleet's weather —
@@ -337,7 +336,7 @@
         position: fixed;
         top: 14px;
         right: 16px;
-        z-index: 120;
+        z-index: var(--z-source);
         display: flex;
         align-items: center;
         gap: 7px;
@@ -362,7 +361,7 @@
     #nogpu {
         position: fixed;
         inset: 0;
-        z-index: 200;
+        z-index: var(--z-nogpu);
         display: none;
         place-items: center;
         background: var(--ink);
@@ -420,10 +419,25 @@
 
     #flightmsg.show { opacity: 1; }
     #flightmsg.good { color: var(--frost); }
+
+    /* One fallback for every moving thing in this file: the boot fade, the
+       grain drift, the wordmark/tagline rise, the progress bar, the gate and
+       hint fades. Anyone who has asked their system for less motion gets the
+       same end states without the travel between them. */
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+        }
+    }
 </style>
 </head>
 <body>
-    <canvas id="view" tabindex="0"></canvas>
+    <!-- Decorative: what the pilot needs is in the DOM readouts below. The
+         canvas still takes focus, because that is how the sim reads the keys. -->
+    <canvas id="view" tabindex="0" aria-hidden="true"></canvas>
 
     <div id="flightmsg"></div>
 

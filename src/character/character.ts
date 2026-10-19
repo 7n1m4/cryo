@@ -170,14 +170,14 @@ export class Character {
   this._panelParams = new Float32Array(6 * 4);
   for (let i = 0; i < this.panels.length; i++) {
    const p = this.panels[i];
-   if (p.cols > TEX_W) throw new Error("panel wider than the transform texture");
+   if (p.cols > TEX_W) throw new Error(`panel ${p.name} is ${p.cols} columns wide, wider than the transform texture's ${TEX_W} — raise TEX_W above ${p.cols} or reduce that panel's \`cols\`.`);
    p.nodeRow = row;
    this._panelParams[i * 4] = row;
    this._panelParams[i * 4 + 1] = p.cols;
    this._panelParams[i * 4 + 2] = p.rows;
    row += p.rows;
   }
-  if (row > TEX_H) throw new Error("transform texture too short for the panels");
+  if (row > TEX_H) throw new Error(`the panels need ${row} transform-texture rows (TEX_H is ${TEX_H}) — raise TEX_H or shrink the panels' rows/panel count.`);
 
   this.charTex = new THREE.DataTexture(
    this._texData, TEX_W, TEX_H, THREE.RGBAFormat, THREE.FloatType

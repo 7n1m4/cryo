@@ -51,6 +51,9 @@ export class Heightfield {
   this.minHeight = 0;
   this.maxHeight = 0;
 
+  /** @type {string|null} Set by `_readback` when the GPU→CPU mirror fails. */
+  this.readbackError = null;
+
   // Two channels, not four: the bake writes height in R and the rock mask
   // in G, and nothing reads B or A. At 4096² the two unused channels would
   // be 134 MB of VRAM holding zeroes. Filtered bilinearly only where the
@@ -136,13 +139,18 @@ export class Heightfield {
    this.gfx.renderer.setRenderTarget(null);
    transient.dispose();
    src = buf;
-  } catch (err) {
-   console.error(err);
+  } catch (err: unknown) {
+   // Non-fatal by contract: `heightCPU` stays null and `heightAt` answers 0,
+   // so grounding degrades to flat instead of aborting boot. The reason is
+   // kept typed rather than left only in the console, so a flat world is
+   // diagnosable instead of silently mysterious.
+   this.readbackError = err instanceof Error && err.message ? err.message : String(err);
   }
   if (!src) {
-   console.warn("[heightfield] readback failed; grounding will be flat");
+   console.warn(`[heightfield] readback failed (${this.readbackError ?? "unknown reason"}); grounding will be flat`);
    return;
   }
+  this.readbackError = null;
 
   // Derived rather than assumed. The read may hand back the texture's
   // own channel count or a widened RGBA copy depending on the backend, and

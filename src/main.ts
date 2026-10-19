@@ -49,6 +49,20 @@ import { loadModelAsset } from "./walkers/modelAsset.js";
 // more — but the collision pass and the presentation loop are still written
 // against *lists* of craft, and their loops stay.
 
+/**
+ * The console debug handle `window.SNOWFLOW`.
+ *
+ * Nothing in this repo reads it — the only access is from the browser console,
+ * so the global is genuinely unowned by any type here. It is declared rather
+ * than reached through an `as unknown as` double cast so the one assignment
+ * below needs no suppression and the shape it publishes is checked.
+ */
+declare global {
+ interface Window {
+  SNOWFLOW?: unknown;
+ }
+}
+
 /** An escort. Its module was removed; the shape is expressed by its uses. */
 type Wingman = {
  effects: {
@@ -117,7 +131,9 @@ type Wreck = {
  * so a compile-time error is raised the moment it is actually called instead
  * of the call silently vanishing — an inert purge remnant. `| undefined` also
  * keeps tsc from narrowing a singly-assigned `const` to the literal type,
- * which would make the declaration itself dead code.
+ * which would make the declaration itself dead code. It is suppressed at the
+ * two publish sites with a non-null assertion rather than `?.`, so calling
+ * the console handle throws the TypeError instead of no-oping.
  */
 const squadImpact: ((x: number, y: number, z: number) => void) | undefined = undefined;
 
@@ -609,7 +625,8 @@ async function boot() {
    return speeder.position;
   },
   // Inert purge remnant: never assigned, so a call throws exactly as it
-  // would have without the `| undefined` on the binding above.
+  // would have without the `| undefined` on the binding above. `?.` here
+  // would turn that TypeError into a silent no-op.
   squadImpact: (x: number, z: number) => squadImpact!(x, 0, z),
   // Where the player's own crash ends up, and what happens after it.
   // Back in the air where the fight is, and flying immediately.
@@ -1446,7 +1463,7 @@ async function boot() {
  soundButton.reveal();
  setTimeout(() => overlay.resetSpikes(), 800);
 
- const snowflowGlobal = globalThis as unknown as { SNOWFLOW: unknown };
+ const snowflowGlobal = window;
  snowflowGlobal.SNOWFLOW = {
   gfx, scene: gfx.scene, rig, character, figure, wrecks, speeder, collision, contact, spray, wake, spells,
   overlay, touchControls, terrain, sky, shadows, post, depthPass,

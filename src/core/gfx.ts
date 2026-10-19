@@ -57,18 +57,18 @@ export class Gfx {
    });
   } catch (err) {
    console.error(err);
-   throw new Error("WebGL2 is not available in this browser.");
+   throw new Error("WebGL2 is not available in this browser — try an up-to-date browser on a desktop GPU.");
   }
   if (!renderer.capabilities.isWebGL2) {
    renderer.dispose();
-   throw new Error("WebGL2 is not available in this browser.");
+   throw new Error("WebGL2 is not available in this browser — try an up-to-date browser on a desktop GPU.");
   }
 
   const gl = renderer.getContext();
   // Every HDR target needs this; there is no fallback path worth having.
   if (!gl.getExtension("EXT_color_buffer_float")) {
    renderer.dispose();
-   throw new Error("WebGL2 float render targets are unavailable in this browser.");
+   throw new Error("WebGL2 float render targets are unavailable in this browser — try an up-to-date browser on a desktop GPU.");
   }
   // The heightfield is RG32F and is filtered in the vertex shader. Warn
   // and degrade (owners of 32F targets check `caps.floatLinear`).

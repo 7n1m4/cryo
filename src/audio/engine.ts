@@ -65,10 +65,28 @@ export class AudioEngine {
   /** @type {Map<string, AudioBuffer>} */
   this.buffers = new Map();
 
+  /**
+   * Keys whose fetch/decode threw. The load loop is deliberately non-fatal:
+   * one asset missing is not a reason to drop the other forty, so `load()`
+   * still resolves and `buffers` simply keeps that key absent. Recording it
+   * here is what makes that policy auditable — `failed.has(k)` now tells a
+   * caller "this asset was attempted and threw" apart from "never attempted",
+   * where both used to read as an absent key in `buffers`.
+   * @type {Set<string>}
+   */
+  this.failed = new Set();
+
   /** True once every manifest entry has been fetched and decoded (or failed). */
   this.loaded = false;
   /** True once a user gesture has resumed the context. */
   this.unlocked = false;
+  /**
+   * The rejection from the last refused `ctx.resume()`, or null. The return
+   * value of `unlock()` stays the boolean callers branch on; this keeps the
+   * reason it came back false.
+   * @type {unknown}
+   */
+  this.lastResumeError = null;
 
   /** @type {LoopVoice[]} */
   this._loops = [];
@@ -234,8 +252,13 @@ export class AudioEngine {
       report();
      });
      this.buffers.set(k, buf);
-    } catch (err) {
+    } catch (err: unknown) {
+     // Deliberately non-fatal: one missing asset must not take the other
+     // forty with it, so the loop continues and `buffers` simply keeps this
+     // key absent. The non-fatality is recorded in `this.failed` so it is
+     // visible to a caller rather than a swallow.
      console.warn("[audio] failed to load '" + k + "':", err);
+     this.failed.add(k);
     }
     frac[i] = 1;
     report();
@@ -304,14 +327,21 @@ export class AudioEngine {
  /**
   * Resume the context. Must be called synchronously from inside a user
   * gesture handler — the boot gate's button or the sound button.
+  *
+  * The boolean is the contract callers branch on (`false` = no sound, stay
+  * mute), so a refused resume still returns `false`. What was lost was the
+  * reason: it went to the console and nowhere else. `lastResumeError` holds
+  * the rejection so a caller or a test can read why, not just that.
+  * @returns {Promise<boolean>}
   */
  async unlock() {
   const ctx = this._ensureContext();
   if (!ctx) return false;
   try {
    if (ctx.state !== "running") await ctx.resume();
-  } catch (err) {
+  } catch (err: unknown) {
    console.warn("[audio] resume refused:", err);
+   this.lastResumeError = err;
    return false;
   }
   this.unlocked = ctx.state === "running";
