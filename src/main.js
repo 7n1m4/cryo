@@ -7,7 +7,6 @@
  */
 
 import * as THREE from "three";
-import { inject as injectAnalytics } from "@vercel/analytics";
 
 import { registerShaders } from "./shaders/registry.js";
 import { S, onChange, applyPreset } from "./core/settings.js";
@@ -30,6 +29,7 @@ import { Speeder } from "./player/speeder.js";
 import { CollisionPass, emitBurnTrail } from "./physics/collisionPass.js";
 import { Overlay } from "./ui/overlay.js";
 import { createFpsMeter } from "./ui/fpsMeter.js";
+import { createPerfHud } from "./ui/perfHud.js";
 import { Sky } from "./render/sky.js";
 import { ShadowSystem } from "./render/shadows.js";
 import { Terrain } from "./terrain/terrain.js";
@@ -94,11 +94,6 @@ const DEATH_CAM_PITCH = 0.42;
 const DEATH_CAM_PITCH_PILOT = 0.1;
 
 
-// Vercel Web Analytics: page views and visitors on the deployment. The
-// injected script is served from the site's own origin (/_vercel/insights),
-// so there is nothing to allowlist; in dev it runs in debug mode and sends
-// nothing.
-injectAnalytics();
 
 async function boot() {
  const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("view"));
@@ -244,72 +239,42 @@ async function boot() {
  // a shellburst stirs and rises rather than napping through the battle.
  // Walkers purged: no AT-AT/AT-ST bolt chains remain.
 
- let wrecks = null;
+ let wrecks = [];
  let leaveWreck = null;
- if (wingmen.length) {
+ if (FLYING) {
   const speederAsset2 = await speederReady;
   wrecks = [];
-  let wreckNext = 0;
-  for (let i = 0; i < 3; i++) {
-   const ctl = {
-    position: new THREE.Vector3(0, -500, 0),
-    velocity: new THREE.Vector3(),
-    facing: 0, lean: 0.32, steerRate: 0,
-    speed01: 0, speedRaw: 0,
-    climb: -2.35, lift01: 0, pathY: 0, groundY: 0,
-    driveHeld: false, boostHeld: false, fireHeld: false,
-   };
-   const hull = new Speeder(gfx, terrain, sky, shadows, speederAsset2, ctl, null);
-   // A wreck, not a craft: hover, bob and jet all dead, belly laid
-   // slightly under the surface so the snow reads as claiming it.
-   hull.grounded = true;
-   hull.registerPrepass(depthPass);
-   hull.setVisible(false);
-   wrecks.push({
-    hull, ctl, active: false, burnT: 0, age: 0, smokeT: 0,
-    pilotX: 0, pilotZ: 0,
-   });
-  }
-
-  /**
-   * Leave a hull in the snow, and its pilot beside it.
-   *
-   * The player's own crash comes through here — the same wreck, the same body
-   * clear, because a snowspeeder that went in looks like a snowspeeder that
-   * went in whoever was flying it. For the player it is also what makes the
-   * restart mean something: they fly back out to the line past the ship
-   * they lost.
-   *
-   * @param {number} x @param {number} z where it came to rest
-   * @param {number} facing the yaw it was carrying
-   */
+  const ctl = {
+   position: new THREE.Vector3(0, -500, 0),
+   velocity: new THREE.Vector3(),
+   facing: 0, lean: 0.32, steerRate: 0,
+   speed01: 0, speedRaw: 0,
+   climb: -2.35, lift01: 0, pathY: 0, groundY: 0,
+   driveHeld: false, boostHeld: false, fireHeld: false,
+  };
+  const hull = new Speeder(gfx, terrain, sky, shadows, speederAsset2, ctl, null);
+  hull.grounded = true;
+  hull.registerPrepass(depthPass);
+  hull.setVisible(false);
+  wrecks.push({
+   hull, ctl, active: false, burnT: 0, age: 0, smokeT: 0,
+   pilotX: 0, pilotZ: 0,
+  });
   leaveWreck = (x, z, facing) => {
-   const wk = wrecks[wreckNext];
-   if (!wk) return;
-   wreckNext = (wreckNext + 1) % wrecks.length;
-   wk.active = true;
-   wk.burnT = 32;
-   wk.age = 0;
-   wk.smokeT = 0;
-   wk.ctl.position.set(x, 0, z);
-   wk.ctl.facing = facing;
-   wk.ctl.lean = (Math.random() < 0.5 ? -1 : 1)
-    * (0.25 + Math.random() * 0.15);
-   wk.ctl.groundY = terrain.heightAt(x, z);
-   wk.ctl.pathY = wk.ctl.groundY;
-   wk.hull.snowOverride = 0;
-   wk.hull.setVisible(true);
-   // The pilot, thrown clear — a little away from the ship, off to the
-   // side of the skid line.
-   const side = facing + (Math.random() < 0.5 ? 1 : -1)
-    * (0.9 + Math.random() * 0.7);
+   const wk = wrecks[0];
+   if (!wk) return null;
+   wk.active = true; wk.burnT = 32; wk.age = 0; wk.smokeT = 0;
+   wk.ctl.position.set(x, 0, z); wk.ctl.facing = facing;
+   wk.ctl.lean = (Math.random() < 0.5 ? -1 : 1) * (0.25 + Math.random() * 0.15);
+   wk.ctl.groundY = terrain.heightAt(x, z); wk.ctl.pathY = wk.ctl.groundY;
+   wk.hull.snowOverride = 0; wk.hull.setVisible(true);
+   const side = facing + (Math.random() < 0.5 ? 1 : -1) * (0.9 + Math.random() * 0.7);
    const throwOut = 4 + Math.random() * 1.5;
    wk.pilotX = x + Math.sin(side) * throwOut;
    wk.pilotZ = z + Math.cos(side) * throwOut;
    return null;
   };
  }
-
  const enemyFire = [];
  // The shared fate token: one ship wounded and falling at a time, ever.
  const raid = { turn: 0, size: Math.max(1, wingmen.length) };
@@ -535,13 +500,14 @@ async function boot() {
  // snow, smoke, fire and the report to the field. Gated live by
  // S.collisions; every collaborator is optional, so a boot without a
  // speeder or without wingmen runs the parts it has.
+ let storyMode = false;
  const collision = new CollisionPass({
-  character,
   activeCharacter: () => (flying && shipController) ? shipController : character,
   speeder, wingmen,
   wrecks, terrain, spray, smoke, rig, audio, troopers: null,
   parked: () => {
    if (flying || !speeder) return null;
+   if (wrecks.length && wrecks[0]?.active) return null;
    const dx = character.position.x - speeder.position.x;
    const dz = character.position.z - speeder.position.z;
    if (dx * dx + dz * dz < 3.5 * 3.5) return null;
@@ -556,23 +522,36 @@ async function boot() {
   // already making way, with control.
   onRestart: () => {
    if (S.speeder !== true) return;
-   const bx = character.position.x;
-   const bz = character.position.z;
-   const h = 0;
-   const sc = shipController || character;
-   sc.position.x = bx - Math.sin(h) * RESPAWN_OUT;
-   sc.position.z = bz - Math.cos(h) * RESPAWN_OUT;
-   sc.facing = h;
-   sc.velocity.set(Math.sin(h) * 24, 0, Math.cos(h) * 24);
-   character.position.copy(sc.position);
-   character.facing = sc.facing;
-   character.velocity.copy(sc.velocity);
-   input.riseLevel = 3;
-  },
-  onWreck: (x, z, facing) => {
-   // The body becomes the crash camera's subject — see the
-   // through the same door and simply ignores the return.
-   deathCamPilot = leaveWreck(x, z, facing);
+   if (!storyMode) {
+    // Free flight: back in the air where the fight is.
+    const bx = character.position.x;
+    const bz = character.position.z;
+    const h = 0;
+    const sc = shipController || character;
+    sc.position.x = bx - Math.sin(h) * RESPAWN_OUT;
+    sc.position.z = bz - Math.cos(h) * RESPAWN_OUT;
+    sc.facing = h;
+    sc.velocity.set(Math.sin(h) * 24, 0, Math.cos(h) * 24);
+    character.position.copy(sc.position);
+    character.facing = sc.facing;
+    character.velocity.copy(sc.velocity);
+    input.riseLevel = 3;
+    flying = true;
+    speeder?.setVisible?.(true);
+    figure.setVisible(false);
+    applyModeExtras();
+    return;
+   }
+   // Story mode: strand the ship into the wreck and continue on foot.
+   leaveWreck?.(character.position.x, character.position.z, character.facing);
+   flying = false;
+   speeder?.setVisible?.(false);
+   character.position.y = terrain.heightAt(character.position.x, character.position.z);
+   character.groundY = character.position.y;
+   character.velocity.set(0, 0, 0);
+   character.crashing = false; character.crashLanded = false; character.crashDown = false;
+   applyModeExtras();
+   showFigure();
   },
  });
 
@@ -703,6 +682,7 @@ async function boot() {
  // The same two numbers the overlay carries, on their own, for when the panel
  // would cover the thing being measured.
  const fpsMeter = createFpsMeter();
+ const perfHud = createPerfHud();
  initInput(canvas, {
   onToggleOverlay: toggleOverlay,
   onToggleFps: () => fpsMeter.toggle(),
@@ -890,6 +870,54 @@ async function boot() {
   }
   applyModeExtras();
  };
+ // ------------------------------------------------------- main menu gate
+ await new Promise((resolve) => {
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:radial-gradient(ellipse at 30% 20%,rgba(40,70,140,0.35),transparent 60%),radial-gradient(ellipse at 70% 80%,rgba(80,40,120,0.25),transparent 60%),rgba(4,6,14,0.92);color:#dfe6f5;font-family:ui-monospace,monospace;";
+  const title = document.createElement("div");
+  title.textContent = "SNOWFLOW";
+  title.style.cssText = "font-size:1.6rem;letter-spacing:0.35em;text-transform:uppercase;font-weight:300;margin-bottom:4px;";
+  const sub = document.createElement("div");
+  sub.textContent = "S — story mode (ship stranded, repair to fly)    ·    Enter — free flight";
+  sub.style.cssText = "font-size:0.72rem;letter-spacing:0.18em;text-transform:uppercase;opacity:0.6;margin-bottom:18px;";
+  const btnStyle = "min-width:220px;padding:10px 20px;font-size:0.8rem;letter-spacing:0.2em;text-transform:uppercase;cursor:pointer;background:rgba(255,255,255,0.04);color:#dfe6f5;border:1px solid rgba(255,255,255,0.18);border-radius:2px;transition:background .15s,border-color .15s;";
+  const storyBtn = document.createElement("button");
+  storyBtn.textContent = "Story Mode  (S)";
+  storyBtn.style.cssText = btnStyle;
+  const flyBtn = document.createElement("button");
+  flyBtn.textContent = "Free Flight  (Enter)";
+  flyBtn.style.cssText = btnStyle;
+  for (const b of [storyBtn, flyBtn]) {
+   b.addEventListener("mouseenter", () => { b.style.background = "rgba(255,255,255,0.1)"; b.style.borderColor = "rgba(255,255,255,0.4)"; });
+   b.addEventListener("mouseleave", () => { b.style.background = "rgba(255,255,255,0.04)"; b.style.borderColor = "rgba(255,255,255,0.18)"; });
+  }
+  overlay.append(title, sub, storyBtn, flyBtn);
+  document.body.appendChild(overlay);
+  // (overlay already appended above)
+
+  const choose = (story) => {
+   storyMode = story;
+   overlay.remove();
+   window.removeEventListener("keydown", onKey);
+   resolve();
+  };
+  const onKey = (e) => {
+   if (e.code === "KeyS") choose(true);
+   else if (e.code === "Enter") choose(false);
+  };
+  window.addEventListener("keydown", onKey);
+  storyBtn.addEventListener("click", () => choose(true));
+  flyBtn.addEventListener("click", () => choose(false));
+ });
+
+ if (storyMode) {
+  const x = character.position.x, z = character.position.z, f = character.facing;
+  leaveWreck?.(x, z, f);
+  flying = false;
+  speeder?.setVisible?.(false);
+  applyModeExtras();
+  showFigure();
+ }
 
  gfx.renderer.setAnimationLoop(() => {
   const now = performance.now();
@@ -904,7 +932,29 @@ async function boot() {
 
   // Mode toggle: exit/enter the ship.
   const toggleDown = isDown("KeyR");
-  if (toggleDown && !prevToggleKey) toggleMode();
+  if (toggleDown && !prevToggleKey) {
+   if (!flying && wrecks.length && wrecks[0]?.active) {
+    const wk = wrecks[0];
+    const dx = character.position.x - wk.ctl.position.x;
+    const dz = character.position.z - wk.ctl.position.z;
+    if (dx * dx + dz * dz <= 8 * 8) {
+     // repair: bring the flyable ship back online at the wreck
+     shipController.position.copy(wk.ctl.position);
+     shipController.facing = wk.ctl.facing;
+     shipController.velocity.set(0, 0, 0);
+     speeder.position.copy(wk.ctl.position);
+     character.position.copy(shipController.position);
+     character.facing = shipController.facing;
+     character.position.y = terrain.heightAt(character.position.x, character.position.z);
+     character.groundY = character.position.y;
+     wk.active = false;
+     wk.hull.setVisible(false);
+     toggleMode();
+    }
+   } else {
+    toggleMode();
+   }
+  }
   prevToggleKey = toggleDown;
 
   // The opening hold: escorts overhead, Luke on the wire, stick frozen.
@@ -1246,6 +1296,7 @@ async function boot() {
   checkSpike(dtMs);
   overlay.update(dtMs, gfx);
   fpsMeter.update(dtMs);
+  perfHud.update(dtMs, gfx);
 
   endFrame();
  });
@@ -1286,7 +1337,7 @@ async function boot() {
  // The instant the player is coming in — boot screen starting its fade —
  // stage the formation behind them, so the escorts thunder overhead in the
  // first seconds of the game rather than at some point during the loading.
- startFlyover();
+ if (!storyMode) startFlyover();
  // The transmission square, on the same gesture. Ends (or is clicked away)
  // on its own; nothing waits on it.
  audio.play("lukeIntro", { delay: 0.3 });
