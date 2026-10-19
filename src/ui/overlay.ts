@@ -9,7 +9,10 @@
  */
 
 import { S, SCHEMA, set, applyPreset } from "../core/settings.js";
-import type { PresetName, SettingKey, SettingValue } from "../core/settings.js";
+import type { PresetName, SettingKey } from "../core/settings.js";
+import type { CameraRig } from "../core/camera.js";
+import type { CharacterController } from "../character/controller.js";
+import type { Gfx } from "../core/gfx.js";
 import { stats, systemMs, FrameGraph, spikes, resetSpikes } from "../core/perf.js";
 
 const CSS = `
@@ -95,16 +98,57 @@ const CSS = `
   user-select: text; cursor: text; }
 `;
 
+/**
+ * Live systems the debug readouts sample.
+ *
+ * Optional so the overlay can be constructed before they exist; see
+ * `attach()`. `refs.actions` holds the named callbacks behind the SCHEMA's
+ * `t: "a"` rows.
+ */
+interface OverlayRefs {
+ rig?: CameraRig;
+ character?: CharacterController;
+ actions?: Record<string, () => void>;
+}
+
 export class Overlay {
- [key: string]: any;
+ /** The panel itself. */
+ el: HTMLElement;
+ /** Whether the panel is showing — the only state outside the DOM. */
+ visible = false;
+ /** Frame-time graph, drawn on its own cadence. */
+ graph: FrameGraph;
+ /** Readout value spans, keyed by readout name; `readouts[k + "_row"]` is the row. */
+ readouts: Record<string, HTMLElement> = {};
+ /** Container for the lazily created per-system cost rows. */
+ budgetEl: HTMLElement;
+ /** Per-system cost row, keyed by system name, created on first sighting. */
+ budgetRows = new Map<string, HTMLElement>();
+ /** Live rig the camera readout samples; null until `attach()`. */
+ rig: CameraRig | null = null;
+ /** Live character the player readout samples; null until `attach()`. */
+ character: CharacterController | null = null;
+ /** Named callbacks behind the SCHEMA's `t: "a"` rows. */
+ actions: Record<string, () => void> = {};
+ /** The pose line, held for the clipboard button while the panel is closed. */
+ poseEl!: HTMLElement;
+ /** Quality-preset buttons, keyed by preset name. */
+ presetBtns: Record<string, HTMLElement> = {};
+ /** One control row per SCHEMA item, so a preset can be re-applied to them. */
+ widgets: Array<{ k: string; sync: () => void }> = [];
+ /** Accumulators for the graph, camera, and numbers cadences, in ms. */
+ _acc = 0;
+ _graphAcc = 0;
+ _camAcc = 0;
+ /** The last pose line, copied to the clipboard. */
+ _pose = "";
+
  /**
-  * @param {{ rig?: import("../core/camera.js").CameraRig,
-  *           character?: import("../character/controller.js").CharacterController,
-  *           actions?: Record<string, () => void> }} [refs]
+  * @param {OverlayRefs} [refs]
   *   Live systems the debug readouts sample. Optional so the overlay can be
   *   constructed before they exist; see `attach()`.
   */
- constructor(refs: any) {
+ constructor(refs?: OverlayRefs) {
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.appendChild(style);
@@ -134,8 +178,7 @@ export class Overlay {
   nums.className = "nums";
   el.appendChild(nums);
 
-  /** @type {Record<string, HTMLElement>} */
-  this.readouts = {};
+  // The readouts themselves start empty and are filled by `_mkNum` below.
   this._mkNum(nums, "fps", "fps");
   this._mkNum(nums, "fpsLow", "1% low");
   this._mkNum(nums, "median", "median");
@@ -154,8 +197,6 @@ export class Overlay {
   budget.className = "nums budget";
   el.appendChild(budget);
   this.budgetEl = budget;
-  /** @type {Map<string, HTMLElement>} */
-  this.budgetRows = new Map();
 
   // --------------------------------------------------------- camera
   // Debug readout for framing a view and reproducing it later: everything
@@ -197,8 +238,6 @@ export class Overlay {
   el.appendChild(ph);
   const pr = document.createElement("div");
   pr.className = "presets";
-  /** @type {Record<string, any>} */
-  this.presetBtns = {};
   /** The three quality presets, in panel order. */
   const PRESET_NAMES: readonly PresetName[] = ["ultra", "high", "balanced"];
   for (const name of PRESET_NAMES) {
@@ -215,28 +254,29 @@ export class Overlay {
   this._syncPresets();
 
   // ------------------------------------------------------- controls
-  /** @type {Array<{k:string, sync:() => void}>} */
-  this.widgets = [];
+  // The widgets themselves are registered by `_mkGroup` as it appends each row.
   for (let g = 0; g < SCHEMA.length; g++) this._mkGroup(SCHEMA[g]);
-
-  /** @type {Record<string, any>} */
-  this._lastText = Object.create(null);
-  this._acc = 0;
-  this._graphAcc = 0;
-  this._camAcc = 0;
-  this._pose = "";
  }
 
  /**
   * Late-bind the systems the camera readout samples.
-  * @param {{ rig?: any, character?: any }} refs
+  *
+  * @param {OverlayRefs} refs
   */
- attach(refs: any) {
+ attach(refs: OverlayRefs) {
   if (refs.rig) this.rig = refs.rig;
   if (refs.character) this.character = refs.character;
  }
- /** @param {any} parent @param {any} key @param {any} label */
- _mkNum(parent: any, key: any, label: any) {
+ /**
+  * One readout: a label and its value span, registered in `readouts` under
+  * `key` and `key + "_row"` so both the text and its warn/bad class can be
+  * updated later.
+  *
+  * @param {HTMLElement} parent
+  * @param {string} key
+  * @param {string} label
+  */
+ _mkNum(parent: HTMLElement, key: string, label: string) {
   const d = document.createElement("div");
   d.className = "num";
   const a = document.createElement("span");
@@ -250,12 +290,15 @@ export class Overlay {
   this.readouts[key + "_row"] = d;
  }
  /**
-  * One row of `SCHEMA`. Narrowed by `t`, because each row kind reads a
-  * different shape: "f"/"b"/"e" name a single key, "c" names three channel
-  * keys, and "a" names none at all.
+  * Append every row of one SCHEMA group under its heading.
+  *
+  * The parameter stays at `SCHEMA`'s own (loose) element type rather than
+  * `SchemaItem[]`: `settings.ts` widens every row's `t` to `string`, so a strict
+  * parameter could only be satisfied by an assertion at the call site — which
+  * would move the unchecked part away from the data. Instead the cast sits at
+  * the loop below, and narrowing is what re-establishes the real union there.
   */
- /** @param {any} group */
- _mkGroup(group: any) {
+ _mkGroup(group: SchemaGroup) {
   const h = document.createElement("h2");
   h.textContent = group.group;
   this.el.appendChild(h);
@@ -396,10 +439,13 @@ export class Overlay {
  }
 
  /**
+  * Per-frame tick. The readouts re-render on slower cadences than the frame
+  * itself: the graph at 20 Hz, the camera at 10 Hz, the numbers at 4 Hz.
+  *
   * @param {number} dtMs
-  * @param {import("../core/gfx.js").Gfx} gfx
+  * @param {Gfx} gfx
   */
- update(dtMs: any, gfx: any) {
+ update(dtMs: number, gfx: Gfx) {
   if (!this.visible) return;
 
   this._graphAcc += dtMs;
@@ -438,14 +484,18 @@ export class Overlay {
   r.spikes_row.className = "num" + (spikes.count > 0 ? " warn" : "");
 
   // Per-system costs — rows are created lazily and then only mutated.
-  for (const name in systemMs) {
+  // `systemMs` is `Object.create(null)`, so it infers as `any` and the index
+  // below has nothing to check against: `mark()` writes only milliseconds, and
+  // this loop only ever reads them, so the read is a plain number here.
+  const systems = systemMs as Record<string, number>;
+  for (const name in systems) {
    let row = this.budgetRows.get(name);
    if (!row) {
     this._mkNum(this.budgetEl, "sys_" + name, name);
     row = this.readouts["sys_" + name];
     this.budgetRows.set(name, row);
    }
-   this._txt(row, systemMs[name].toFixed(2));
+   this._txt(row, systems[name].toFixed(2));
   }
  }
 
@@ -507,11 +557,15 @@ export class Overlay {
    ";s.rig.distance=s.rig.distanceTarget=" + rig.distance.toFixed(2) + ";";
   return s;
  }
- /** @param {any} btn */
- _copyPose(btn: any) {
+ /**
+  * Copy the current pose line to the clipboard, flashing the button either way.
+  *
+  * @param {HTMLElement} btn
+  */
+ _copyPose(btn: HTMLElement) {
   const text = this._pose || this._poseScript();
-  /** @param {any} ok */
-  const done = (ok: any) => {
+  /** @param {boolean} ok */
+  const done = (ok: boolean) => {
    btn.textContent = ok ? "copied" : "see console";
    if (!ok) console.log(text);
    setTimeout(() => (btn.textContent = "copy pose"), 1200);
@@ -525,8 +579,17 @@ export class Overlay {
   }
  }
 
- /** @param {any} el @param {any} s */
- _txt(el: any, s: any) {
+ /**
+  * Write a readout only when its text changed, so a layout that is already
+  * showing the right value is not invalidated 90 times a second.
+  *
+  * The last value is memoised on the element itself, in a property no other
+  * code reads.
+  *
+  * @param {HTMLElement & { _v?: string }} el
+  * @param {string} s
+  */
+ _txt(el: HTMLElement & { _v?: string }, s: string) {
   if (el._v !== s) {
    el._v = s;
    el.textContent = s;
@@ -554,32 +617,69 @@ type SchemaItem =
  | { kr: SettingKey; kg: SettingKey; kb: SettingKey; l: string; t: "c" }
  | { k: string; l: string; t: "a"; bl?: string; done?: string };
 
+/**
+ * One group of `SCHEMA`, as the source annotates it: `t` and `k` widen to plain
+ * strings there, which is why the row-level narrowing happens in `_mkGroup`
+ * rather than here.
+ */
+type SchemaGroup = (typeof SCHEMA)[number];
+
 const RAD = 180 / Math.PI;
 
-/** @param {any} v */
-function fmt2(v: any) {
+/**
+ * Two decimals, sign-padded so a crossing through zero does not shift the
+ * column. `white-space: pre` in the CSS keeps the padding honest.
+ *
+ * @param {number} v
+ */
+function fmt2(v: number): string {
  const s = v.toFixed(2);
  return v < 0 ? s : " " + s;
 }
-/** @param {any} d */
-function wrapDeg(d: any) {
+/**
+ * Wrap degrees into compass range.
+ *
+ * @param {number} d
+ */
+function wrapDeg(d: number): number {
  d %= 360;
  return d < 0 ? d + 360 : d;
 }
-/** @param {any} d */
-function signDeg(d: any) {
+/**
+ * Signed to one decimal, for pitch — positive means looking down, which is the
+ * rig's own convention.
+ *
+ * @param {number} d
+ */
+function signDeg(d: number): string {
  return (d >= 0 ? "+" : "") + d.toFixed(1) + "°";
 }
-/** @param {any} v @param {any} step */
-function fmtNum(v: any, step: any) {
- if (typeof v !== "number" || !Number.isFinite(v)) v = 0;
- if (step >= 1) return v.toFixed(0);
- if (step >= 0.01) return v.toFixed(2);
- if (step >= 0.001) return v.toFixed(3);
- return v.toFixed(4);
+/**
+ * A setting value to the precision of its step, so a 0.02 slider does not show
+ * 0.2000000000000000111.
+ *
+ * `v` is unvalidated on purpose: it comes out of `S`, which is a union of
+ * numbers, booleans and strings, and a row whose key holds the wrong kind
+ * must read as 0 rather than throw. Do not narrow this away.
+ *
+ * @param {unknown} v
+ * @param {number} step
+ */
+function fmtNum(v: unknown, step: number): string {
+ // Guard: a non-number or non-finite reads as 0 instead of "NaN" or a crash.
+ // The step still decides the precision, exactly as it does for a real value.
+ const n = typeof v === "number" && Number.isFinite(v) ? v : 0;
+ if (step >= 1) return n.toFixed(0);
+ if (step >= 0.01) return n.toFixed(2);
+ if (step >= 0.001) return n.toFixed(3);
+ return n.toFixed(4);
 }
-/** @param {any} n */
-function fmtK(n: any) {
+/**
+ * Big counts to a short form: 1.30M triangles, 42k, or the raw number.
+ *
+ * @param {number} n
+ */
+function fmtK(n: number): string {
  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
  if (n >= 1e3) return (n / 1e3).toFixed(0) + "k";
  return String(n);

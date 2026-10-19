@@ -9,7 +9,7 @@
 import * as THREE from "three";
 
 import { registerShaders } from "./shaders/registry.js";
-import { S, onChange, applyPreset } from "./core/settings.js";
+import { S, onChange, applyPreset, type SettingValue } from "./core/settings.js";
 import {
  sample, checkSpike, stats, mark, installDrawCounter, endFrameDraws,
 } from "./core/perf.js";
@@ -42,6 +42,85 @@ import { createSoundButton } from "./ui/soundButton.js";
 import { createTouchControls } from "./ui/touchControls.js";
 import { OPENING, applyOpening, installShotCapture } from "./core/openingShot.js";
 import { loadModelAsset } from "./walkers/modelAsset.js";
+
+// --------------------------------------------------------- recovered contracts
+// The flight state `main.ts` carries for the code the walker/escort purge left
+// behind. Both arrays are always empty at runtime — nothing populates them any
+// more — but the collision pass and the presentation loop are still written
+// against *lists* of craft, and their loops stay.
+
+/** An escort. Its module was removed; the shape is expressed by its uses. */
+type Wingman = {
+ effects: {
+  smoke: SmokeTrails,
+  enemy: EnemyFire[],
+  raid: { turn: number, size: number },
+  onKillHit: (x: number, y: number, z: number) => void,
+  onBounce: (x: number, y: number, z: number, facing: number) => void,
+  onCrash: (x: number, y: number, z: number, facing: number) => void,
+ },
+ pilot: { bounced: boolean, _fx: unknown, position: THREE.Vector3, facing: number },
+ bounced: boolean,
+ _bounceT: number,
+ flyover: (target: THREE.Vector3, y: number, distance: number) => void,
+ warmUp: () => unknown,
+ tick: (dt: number) => void,
+ update: (dt: number) => void,
+ sync: (cameraPos: THREE.Vector3) => void,
+ triangles: number,
+};
+
+/** The infantry's reaction pipe, read (never written) through the effects bag. */
+type EnemyFire = unknown;
+
+/**
+ * The controller stand-in a wreck's hull is hung off.
+ *
+ * A real `CharacterController` minus the flight machinery — the wreck is never
+ * integrated, so `ctl` is only ever read for pose numbers, which is why the
+ * wreck build constructs these fields by hand rather than taking a controller.
+ */
+type WreckController = {
+ position: THREE.Vector3,
+ velocity: THREE.Vector3,
+ facing: number,
+ lean: number,
+ steerRate: number,
+ speed01: number,
+ speedRaw: number,
+ climb: number,
+ lift01: number,
+ pathY: number,
+ groundY: number,
+ driveHeld: boolean,
+ boostHeld: boolean,
+ fireHeld: boolean,
+};
+
+/** One hull in the graveyard: the player's own craft, stilled after the crash. */
+type Wreck = {
+ hull: Speeder,
+ ctl: WreckController,
+ active: boolean,
+ burnT: number,
+ age: number,
+ smokeT: number,
+ pilotX: number,
+ pilotZ: number,
+};
+
+/**
+ * The fake burst `SNOWFLOW.squadImpact` publishes, and the pass is handed.
+ *
+ * Deleted with the trooper herd: nothing calls it now. The binding stays so
+ * both publish sites keep resolving, and it is `undefined` rather than absent
+ * so a compile-time error is raised the moment it is actually called instead
+ * of the call silently vanishing — an inert purge remnant. `| undefined` also
+ * keeps tsc from narrowing a singly-assigned `const` to the literal type,
+ * which would make the declaration itself dead code.
+ */
+const squadImpact: ((x: number, y: number, z: number) => void) | undefined = undefined;
+
 // ------------------------------------------------------- module-scope scratch
 const _vel = new THREE.Vector3();
 /** Scratch: where the crash camera is pointed. See the death-cam block. */
@@ -222,7 +301,16 @@ async function boot() {
   : null;
  speeder?.registerPrepass(depthPass);
 
- const wingmen = [];
+ /**
+  * The escorts. The escort module was removed with the walker herd, so
+  * nothing populates this and it is always empty at runtime — but it is
+  * retained, because the collision pass and the presentation loop are
+ *  written against a *list* of other craft (the wingman is one of n, not
+ *  a singleton) and rewriting them to drop the loop is the very code loss
+ *  this file has already suffered twice.
+ * @type {Wingman[]}
+ */
+ const wingmen: Wingman[] = [];
  // Where a cannon bolt lands, the infantry reacts — the player's guns report
  // through this handler. Three rings around the burst:
  //
@@ -239,8 +327,8 @@ async function boot() {
  // a shellburst stirs and rises rather than napping through the battle.
  // Walkers purged: no AT-AT/AT-ST bolt chains remain.
 
- let wrecks = [];
- let leaveWreck = null;
+ let wrecks: Wreck[] = [];
+ let leaveWreck: ((x: number, z: number, facing: number) => null) | null = null;
  if (FLYING) {
   const speederAsset2 = await speederReady;
   wrecks = [];
@@ -260,7 +348,7 @@ async function boot() {
    hull, ctl, active: false, burnT: 0, age: 0, smokeT: 0,
    pilotX: 0, pilotZ: 0,
   });
-  leaveWreck = (x, z, facing) => {
+  leaveWreck = (x: number, z: number, facing: number) => {
    const wk = wrecks[0];
    if (!wk) return null;
    wk.active = true; wk.burnT = 32; wk.age = 0; wk.smokeT = 0;
@@ -275,7 +363,14 @@ async function boot() {
    return null;
   };
  }
- const enemyFire = [];
+ /**
+  * Where the wingmen's guns report a burst: the infantry's reaction pipe,
+  * handed to each escort's `effects` bag as `enemy`. Nothing writes it
+ *  (the trooper herd is gone), but the bag's shape still carries the key
+ *  and the pass still reads it.
+ * @type {EnemyFire[]}
+ */
+ const enemyFire: EnemyFire[] = [];
  // The shared fate token: one ship wounded and falling at a time, ever.
  const raid = { turn: 0, size: Math.max(1, wingmen.length) };
  /** Milliseconds inside which a second announcement of the same skip is
@@ -305,7 +400,7 @@ async function boot() {
    // internal 4.0 s and 5.5 s marks on the frames where the craft
    // actually touches the snow; delaying it or restarting it at the
    // ground would smear the whole sequence out of sync.
-   onKillHit: (x, y, z) => {
+   onKillHit: (x: number, y: number, z: number) => {
     // The cannon distance model, to the letter: linear to nothing
     // at 420 m, CUBED so it does not read as loud from across the
     // battle line, and 343 m/s of honest travel time on top.
@@ -347,7 +442,7 @@ async function boot() {
     * ways still only skips once, and a fall skips once by nature
     * (the next contact is the crash, and a respawn separates falls).
     */
-   onBounce: (x, y, z, facing) => {
+   onBounce: (x: number, y: number, z: number, facing: number) => {
     const nowMs = performance.now();
     if (nowMs - (w._bounceT ?? -1e9) < BOUNCE_DEBOUNCE) return;
     w._bounceT = nowMs;
@@ -399,7 +494,7 @@ async function boot() {
      );
     }
    },
-   onCrash: (x, y, z, facing) => {
+   onCrash: (x: number, y: number, z: number, facing: number) => {
     // No report here on purpose. `speederCrash2` started at the
     // killing hit and its own timeline reaches the final crash at
     // 5.5 s, which is this frame — a second sample fired now would
@@ -454,7 +549,7 @@ async function boot() {
       0.05, 0.05, 0.05, 0.6, true
      );
     }
-    leaveWreck(x, z, facing);
+    leaveWreck?.(x, z, facing);
    },
   };
   // The pilot's own back-channel to the same handlers. SimPilot is a
@@ -513,7 +608,9 @@ async function boot() {
    if (dx * dx + dz * dz < 3.5 * 3.5) return null;
    return speeder.position;
   },
-  squadImpact: (x, z) => squadImpact(x, 0, z),
+  // Inert purge remnant: never assigned, so a call throws exactly as it
+  // would have without the `| undefined` on the binding above.
+  squadImpact: (x: number, z: number) => squadImpact!(x, 0, z),
   // Where the player's own crash ends up, and what happens after it.
   // Back in the air where the fight is, and flying immediately.
   //
@@ -602,7 +699,7 @@ async function boot() {
  spells.registerPrepass(depthPass);
 
  // The rig needs ground heights to keep the spring arm above the snow.
- rig.groundAt = (x, z) => terrain.heightAt(x, z);
+ rig.groundAt = (x: number, z: number) => terrain.heightAt(x, z);
 
  // The opening shot, if one has been pinned. Before the warm-up, so the
  // frames rendered behind the loading screen are already the shot rather than
@@ -769,7 +866,7 @@ async function boot() {
  let deathCamDist = 0;
  /** The body the crash camera is circling — the player's own pilot, once
   *  they have been thrown clear. Null during the fall and after. */
- let deathCamPilot = null;
+ let deathCamPilot: { position: THREE.Vector3 } | null = null;
  /**
   * The cockpit's line to the pilot. Silent unless the player pushes the
   * stick during the opening hold — then "stand by" says the lock is
@@ -778,7 +875,7 @@ async function boot() {
   */
  const flightMsg = document.getElementById("flightmsg");
  let flightMsgT = 0;
- const showFlightMsg = (text, seconds, good) => {
+ const showFlightMsg = (text: string, seconds: number, good?: boolean) => {
   if (!flightMsg) return;
   flightMsg.textContent = text;
   flightMsg.classList.toggle("good", !!good);
@@ -792,13 +889,12 @@ async function boot() {
   * mean heading on the first frame and never recomputed — the formation
   * marches *that* course for the whole battle, wherever the player goes.
   */
- let advanceBearing = null;
+ let advanceBearing: number | null = null;
  /**
   * The player's fly-in, or null once they have arrived — set by
   * `startFlyover` alongside the escorts' own staging.
-  * @type {{toX:number, toZ:number, heading:number}|null}
   */
- let introFly = null;
+ let introFly: { toX: number, toZ: number, heading: number } | null = null;
 
  let prevToggleKey = false;
  const toggleMode = () => {
@@ -840,7 +936,6 @@ async function boot() {
    shipController.gaitPhase = 0;
    shipController.cast = 0;
    shipController.impactSpin = 0;
-   shipController.stepping = true;
    shipController._prevSpeed = 0;
    shipController._drive = 0;
    shipController._boost = 1;
@@ -871,7 +966,7 @@ async function boot() {
   applyModeExtras();
  };
  // ------------------------------------------------------- main menu gate
- await new Promise((resolve) => {
+ await new Promise<void>((resolve) => {
   const overlay = document.createElement("div");
   overlay.style.cssText = "position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:radial-gradient(ellipse at 30% 20%,rgba(40,70,140,0.35),transparent 60%),radial-gradient(ellipse at 70% 80%,rgba(80,40,120,0.25),transparent 60%),rgba(4,6,14,0.92);color:#dfe6f5;font-family:ui-monospace,monospace;";
   const title = document.createElement("div");
@@ -895,13 +990,13 @@ async function boot() {
   document.body.appendChild(overlay);
   // (overlay already appended above)
 
-  const choose = (story) => {
+  const choose = (story: boolean) => {
    storyMode = story;
    overlay.remove();
    window.removeEventListener("keydown", onKey);
    resolve();
   };
-  const onKey = (e) => {
+  const onKey = (e: KeyboardEvent) => {
    if (e.code === "KeyS") choose(true);
    else if (e.code === "Enter") choose(false);
   };
@@ -933,23 +1028,30 @@ async function boot() {
   // Mode toggle: exit/enter the ship.
   const toggleDown = isDown("KeyR");
   if (toggleDown && !prevToggleKey) {
-   if (!flying && wrecks.length && wrecks[0]?.active) {
-    const wk = wrecks[0];
+   const wk = wrecks[0];
+   if (!flying && wk && wk.active) {
     const dx = character.position.x - wk.ctl.position.x;
     const dz = character.position.z - wk.ctl.position.z;
     if (dx * dx + dz * dz <= 8 * 8) {
-     // repair: bring the flyable ship back online at the wreck
-     shipController.position.copy(wk.ctl.position);
-     shipController.facing = wk.ctl.facing;
-     shipController.velocity.set(0, 0, 0);
-     speeder.position.copy(wk.ctl.position);
-     character.position.copy(shipController.position);
-     character.facing = shipController.facing;
-     character.position.y = terrain.heightAt(character.position.x, character.position.z);
-     character.groundY = character.position.y;
-     wk.active = false;
-     wk.hull.setVisible(false);
-     toggleMode();
+     // repair: bring the flyable ship back online at the wreck.
+     // `wrecks` only fills when the build has a ship, which is exactly when
+     // shipController and speeder were constructed — narrowing into
+     // locals keeps that explicit rather than relying on it.
+     const sc = shipController;
+     const sp = speeder;
+     if (sc && sp) {
+      sc.position.copy(wk.ctl.position);
+      sc.facing = wk.ctl.facing;
+      sc.velocity.set(0, 0, 0);
+      sp.position.copy(wk.ctl.position);
+      character.position.copy(sc.position);
+      character.facing = sc.facing;
+      character.position.y = terrain.heightAt(character.position.x, character.position.z);
+      character.groundY = character.position.y;
+      wk.active = false;
+      wk.hull.setVisible(false);
+      toggleMode();
+     }
     }
    } else {
     toggleMode();
@@ -1344,14 +1446,18 @@ async function boot() {
  soundButton.reveal();
  setTimeout(() => overlay.resetSpikes(), 800);
 
- globalThis.SNOWFLOW = {
+ const snowflowGlobal = globalThis as unknown as { SNOWFLOW: unknown };
+ snowflowGlobal.SNOWFLOW = {
   gfx, scene: gfx.scene, rig, character, figure, wrecks, speeder, collision, contact, spray, wake, spells,
   overlay, touchControls, terrain, sky, shadows, post, depthPass,
   audio,
   S, input, perfStats: stats,
   captureShot,
   /** Fake a cannon burst at (x, z) — for testing the squad's reactions. */
-  squadImpact: (x, z) => squadImpact(x, 0, z),
+  // Inert purge remnant: never assigned, so a call throws exactly as it
+  // would have without the `| undefined` on the binding above. `?.` here
+  // would turn that TypeError into a silent no-op.
+  squadImpact: (x: number, z: number) => squadImpact!(x, 0, z),
   /**
    * Print the speeder's look settings as a paste-able block.
    *
@@ -1374,11 +1480,15 @@ async function boot() {
     "cinematicCam", "camYawLag", "speederBankLead",
     "speederTurbulence", "camBoostBreath"];
    const w = Math.max(...keys.map((k) => k.length));
+   // The keys are literal names of settings this file does not otherwise
+   // reference, so `S` cannot be indexed by a plain `string` — every one of
+   // them exists on it, and the read is one-to-one with the list above.
+   const readSetting = (k: string): SettingValue => S[k as keyof typeof S];
    const body = keys
-    .map((k) => `    ${k}:${" ".repeat(w - k.length)} ${S[k]},`)
+    .map((k) => `    ${k}:${" ".repeat(w - k.length)} ${readSetting(k)},`)
     .join("\n");
    console.log("// speeder look — tuned\n" + body);
-   return Object.fromEntries(keys.map((k) => [k, S[k]]));
+   return Object.fromEntries(keys.map((k) => [k, readSetting(k)]));
   },
  };
 }

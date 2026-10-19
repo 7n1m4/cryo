@@ -22,7 +22,7 @@
 
 // Vite: eager raw imports of every shader in this tree. (`as: "raw"` is the
 // pre-Vite-6 spelling; `query`/`import` is the current one.)
-const RAW = /** @type {any} */ (import.meta).glob("./**/*.glsl", {
+const RAW = import.meta.glob("./**/*.glsl", {
  query: "?raw",
  import: "default",
  eager: true,

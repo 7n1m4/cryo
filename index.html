@@ -44,6 +44,14 @@
         --frost:    #dbe6f2;
         --frost-dim:#7d8ea3;
         --accent:   #8fc4e8;
+
+        /* Layer stack, named so the numbers stay in one readable row.
+            100 boot overlay, 120 source link above it, 200 hard-failure
+            screen above everything, 50 the HUD rows over the canvas. */
+        --z-hud:    50;
+        --z-boot:   100;
+        --z-source: 120;
+        --z-nogpu:  200;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -54,7 +62,10 @@
         overflow: hidden;
         background: var(--ink);
         color: var(--frost);
-        font-family: ui-sans-serif, "Inter", "Segoe UI", system-ui, sans-serif;
+        /* No Inter, no system-ui default face: the display type here is the
+           site's own — a humanist sans that exists on the machines that matter,
+           with a generic family as the last word rather than a UI default. */
+        font-family: "Optima", "Palatino Linotype", "Palatino", "Book Antiqua", Georgia, serif;
         -webkit-font-smoothing: antialiased;
     }
 
@@ -64,8 +75,15 @@
         width: 100%;
         height: 100%;
         display: block;
-        outline: none;
         touch-action: none;
+    }
+
+    /* The canvas is the cockpit, not chrome — it draws no ring of its own at
+       rest, but keyboard users must still see where the stick is, so it gets a
+       real outline in the accent colour the moment it is focused that way. */
+    #view:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
     }
 
     /* ---------------------------------------------------------------- boot */
@@ -289,7 +307,7 @@
     }
 
     .gate-btn:hover { background: rgba(143, 196, 232, 0.15); color: var(--frost); }
-    .gate-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+    .gate-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     .gate-btn.primary {
         background: rgba(143, 196, 232, 0.2);

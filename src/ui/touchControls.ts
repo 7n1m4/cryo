@@ -206,8 +206,14 @@ export function createTouchControls(hooks?: TouchHooks | null) {
  let originX = 0, originY = 0;
  const restX = RADIUS + 34;
 
- /** @param {number} x @param {number} y */
- const placeStick = (x: any, y: any) => {
+ /**
+  * Fixed the base and knob to a client-space point, in coordinates relative to
+  * the stick's own box.
+  *
+  * @param {number} x
+  * @param {number} y
+  */
+ const placeStick = (x: number, y: number) => {
   const r = stick.getBoundingClientRect();
   base.style.left = knob.style.left = `${x - r.left}px`;
   base.style.top = knob.style.top = `${y - r.top}px`;

@@ -49,12 +49,13 @@ const WRECK_R = 2.2;
  *  Both integrators clamp their step to 1/30 s, so the fastest thing here —
  *  a boosted craft at ~57 m/s — covers under 2 m; a respawn covers 480. */
 const TELEPORT = 12;
-/** Seconds of degraded control a contact buys, by severity. */
-/** @type {Record<'scrape' | 'hit' | 'crash', number>} */
-const SCRAMBLE = { scrape: 0, hit: 0.9, crash: 2.0 };
+/** Seconds of degraded control a contact buys, by severity. Both maps are
+ *  keyed by a severity string produced upstream (`speederImpactResponse` is
+ *  untyped, so `severity` is `any` there), which is why the keys are narrowed
+ *  at the use sites rather than declared as a union the compiler can't see. */
+const SCRAMBLE: Record<string, number> = { scrape: 0, hit: 0.9, crash: 2.0 };
 /** Player camera trauma per severity — the player feels their own hits only. */
-/** @type {Record<'scrape' | 'hit' | 'crash', number>} */
-const TRAUMA = { scrape: 0.12, hit: 0.35, crash: 0.9 };
+const TRAUMA: Record<string, number> = { scrape: 0.12, hit: 0.35, crash: 0.9 };
 /** The field-repair burn after the ladder trips, seconds. */
 const PLAYER_BURN = 20;
 /** Grace after a ladder step — same idea as the wingmen's `_hitGrace`. */
@@ -557,7 +558,9 @@ export class CollisionPass {
   ctl.applyImpact(
    res.vx, res.vz,
    res.spin * /** @type {number} */ (S.impactSpin),
-   SCRAMBLE[/** @type {"scrape"|"hit"|"crash"} */ (res.severity)]
+   // `severity` is one of three literals by construction; String() only
+   // narrows the type, the value is untouched.
+   SCRAMBLE[String(res.severity)]
   );
   return res;
  }
@@ -595,7 +598,9 @@ export class CollisionPass {
   if (isPlayer) {
    const t = sev === "scrape"
     ? TRAUMA.scrape * clamp((closing ?? 0) / /** @type {number} */ (S.impactHit), 0.15, 1)
-    : TRAUMA[/** @type {"scrape"|"hit"|"crash"} */ (sev)];
+    // `sev` is one of three literals by construction; String() only narrows
+    // the type, the value is untouched.
+    : TRAUMA[String(sev)];
    this.rig?.addTrauma(t);
   }
   // A kick of snow and sparks off the contact, thrown along the normal.
@@ -702,8 +707,11 @@ export class CollisionPass {
   const c = this._activeCharacter();
   const slam = c?.terrainSlam;
   if (!slam || !this.speeder || S.speeder !== true) return;
-  const sev = slam.closing > /** @type {number} */ (S.impactCrash) ? "crash"
-   : slam.closing >= /** @type {number} */ (S.impactHit) ? "hit" : "scrape";
+  // `S` is a Record<string, number|boolean|string> — a real `as number` is the
+  // only thing that narrows these reads in a .ts file; a JSDoc `/** @type */`
+  // parenthesised cast is ignored by tsc here and would buy nothing.
+  const sev = slam.closing > (S.impactCrash as number) ? "crash"
+   : slam.closing >= (S.impactHit as number) ? "hit" : "scrape";
   const hull = this.speeder.position;
   this._contactFx(
    sev, hull.x, hull.y - 1.2, hull.z, true, slam.nx, slam.nz,

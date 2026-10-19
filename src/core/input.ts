@@ -85,10 +85,8 @@ let rmbHeld = false;
 /** Set once a touch has been seen on the canvas; suppresses the pointer lock. */
 let touchSeen = false;
 
-/** @type {(() => void)|null} */
-let onToggleOverlay = null;
-/** @type {(() => void)|null} */
-let onToggleFps = null;
+let onToggleOverlay: (() => void) | null = null;
+let onToggleFps: (() => void) | null = null;
 
 /**
  * @param {HTMLCanvasElement} canvas
@@ -207,8 +205,7 @@ export function initInput(canvas: any, hooks: any) {
   touch.z = 0;
  });
 }
-/** @type {Record<string, number>} */
-const SPELL_KEYS = {
+const SPELL_KEYS: Record<string, number> = {
  Digit1: 1,
  Digit2: 2,
  Digit3: 3,

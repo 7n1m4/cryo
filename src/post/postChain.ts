@@ -54,8 +54,9 @@ import { getShader } from "../shaders/registry.js";
 import { FullscreenPass } from "../core/gpuUtil.js";
 import { mulMat4, invertMat4 } from "../core/mat4.js";
 
-/** @type {Record<string, number>} */
-const TONEMAP_MODES = { agx: 0, aces: 1, none: 2 };
+// Indexed by the `S.tonemap` enum string, so a real (not JSDoc) record type is
+// what makes `[S.tonemap]` legal.
+const TONEMAP_MODES: Record<string, number> = { agx: 0, aces: 1, none: 2 };
 
 /**
  * Halton(2,3). Eight subpixel positions, low-discrepancy so the accumulated
@@ -511,7 +512,7 @@ export class PostChain {
    u.textureSampler.value = this._dofRT.texture;
    u.exposure.value = S.exposure;
    u.contrast.value = S.contrast;
-   u.mode.value = /** @type {any} */(TONEMAP_MODES)[/** @type {any} */(S.tonemap)] ?? 0;
+   u.mode.value = TONEMAP_MODES[S.tonemap] ?? 0;
    u.grainAmount.value = S.grain ? S.grainStrength : 0;
    u.time.value = this.time;
    u.vignette.value = 0.22;

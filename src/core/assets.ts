@@ -36,24 +36,17 @@
 const DEFAULT_BASE = "";
 
 /**
- * The build-time knobs this module reads, plus the one place env crosses the
- * TS boundary. `import.meta.env` is injected by Vite at build time and is not
- * in the DOM/ES2022 `lib`, so the bag is asserted once here — at the single
- * boundary — rather than cast away at each read.
+ * The only env read in the codebase, isolated and documented at its boundary.
  *
- * There is no `vite-env.d.ts` in this project, so the ambient `ImportMetaEnv`
- * Vite normally supplies is absent and the shape would otherwise be unknown.
+ * `import.meta.env` is injected by Vite at build time and typed by
+ * `vite/client` (see `src/vite-env.d.ts`), so the read needs no cast.
+ *
+ * The `?? {}` stays because Vite's `ImportMetaEnv` does not guarantee a value
+ * for every key: a build without `VITE_ASSET_BASE` set leaves it `undefined`,
+ * which is exactly the case that must mean same-origin below.
  */
-interface AssetEnv {
- /** CDN base for the binaries, or unset to serve them from this origin. */
- VITE_ASSET_BASE?: string;
-}
-
-/** The only env read in the codebase, isolated and documented at its boundary. */
-function assetBaseEnv(): AssetEnv {
- // Vite replaces `import.meta.env` statically at build time; there is no
- // runtime object to narrow and no way to validate what the bundler emits.
- return (import.meta as unknown as { env?: AssetEnv }).env ?? {};
+function assetBaseEnv(): ImportMetaEnv {
+ return import.meta.env ?? {};
 }
 
 /** Trailing slashes stripped, so `asset()` never emits a double slash. */

@@ -35,8 +35,9 @@ const DETAIL_RES = 1024;
 
 const CASCADE_COUNT = 3;
 
-/** @type {Record<string, number>} */
-const DEBUG_MODES = {
+// Indexed by the `S.debugView` enum string, so a real (not JSDoc) record type
+// is what makes `[S.debugView]` legal.
+const DEBUG_MODES: Record<string, number> = {
  beauty: 0, deform: 1, normals: 2, depth: 3, cascades: 4,
  footprint: 5, fineNormals: 6, shadow: 7, ndotl: 8, shadowMap: 9,
  albedo: 10,
@@ -480,7 +481,7 @@ export class Terrain {
   u.deformTexel.value = this.deform.texel;
   u.deformDepthScale.value = S.deformDepth;
 
-  u.debugMode.value = (/** @type {any} */ (DEBUG_MODES))[/** @type {any} */ (S.debugView)] ?? 0;
+  u.debugMode.value = DEBUG_MODES[S.debugView] ?? 0;
   u.screenSize.value.set(this.gfx.renderWidth, this.gfx.renderHeight);
   this.material.wireframe = /** @type {boolean} */ (S.wireframe);
 

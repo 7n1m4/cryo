@@ -16,6 +16,14 @@ import { composeShader } from "../shaders/registry.js";
 
 /**
  * The shader-body + uniforms contract every caller fills in.
+ *
+ * The index signature is the documented pass-through: every key past
+ * `name`/`vertex`/`fragment`/`uniforms` is spread onto the
+ * `RawShaderMaterialParameters` bag as a material flag. It does NOT validate
+ * those keys — a typo (`transparnet`) is passed through unchecked, exactly as
+ * the original `& Record<string, any>` JSDoc did. The part that IS recovered
+ * versus that JSDoc is `uniforms`: three's own `IUniform` defaults its value to
+ * `any`, so this catches a non-uniform passed as a uniform value.
  */
 interface MaterialOpts {
  /** Optional label; `mat.name` falls back to `""`. */
@@ -26,7 +34,7 @@ interface MaterialOpts {
  fragment: string;
  /** Named uniforms, passed straight through to the material. */
  uniforms?: Record<string, { value: unknown }>;
- /** Any other key becomes a `RawShaderMaterial` flag (transparent, depthWrite, side, …). */
+ /** Any other key is spread onto the material as a flag. Not validated. */
  [flag: string]: unknown;
 }
 
