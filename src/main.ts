@@ -1039,10 +1039,8 @@ async function boot() {
   const dt = S.freezeTime ? 0 : dtMs / 1000;
   time += dt;
 
-  input.flying = flying;
-  pollInput();
-
-  // Mode toggle: exit/enter the ship.
+  // Mode toggle: exit/enter the ship. BEFORE the input poll, so the poll
+  // publishes the mode the frame's update is about to run in.
   const toggleDown = isDown("KeyR");
   if (toggleDown && !prevToggleKey) {
    const wk = wrecks[0];
@@ -1060,6 +1058,15 @@ async function boot() {
       sc.position.copy(wk.ctl.position);
       sc.facing = wk.ctl.facing;
       sc.velocity.set(0, 0, 0);
+      // The wreck's own pose numbers stand in for a controller here, and
+      // `ctl.surf` is not among them — the hand-off below seeds the ship's
+      // controller, so what the *walk* side is still holding is the state
+      // the exit left behind. Unreset, the stuck-open surf blend keeps the
+      // on-foot figure driving from the wreck's heading and keeps the
+      // recycled wreck input latching thrust on a hull nobody is flying.
+      character.surf = 0;
+      character.surfActive = false;
+      character.stepping = true;
       sp.position.copy(wk.ctl.position);
       character.position.copy(sc.position);
       character.facing = sc.facing;
@@ -1075,6 +1082,14 @@ async function boot() {
    }
   }
   prevToggleKey = toggleDown;
+
+  // Now the poll, in the mode the toggle just decided — `pollInput` reads
+  // `input.flying` for the pinned surf/trigger and the throttle axes, and
+  // `CharacterController._surfStep` reads it again for the steer and the
+  // thrust curve. Publishing it before the toggle above meant one frame of
+  // every one of those decisions running in the mode we had just left.
+  input.flying = flying;
+  pollInput();
 
   // The opening hold: escorts overhead, Luke on the wire, stick frozen.
   // Movement only — the mouse still looks around, which is the point of
