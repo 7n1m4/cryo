@@ -251,12 +251,12 @@ export class AudioEngine {
   const ctx = this.ctx;
   if (!ctx || !this.master) return;
   const now = ctx.currentTime;
-  const master = this.unlocked && !S.audioMuted ? /** @type {number} */ (S.masterVolume) : 0;
+  const master = this.unlocked && !S.audioMuted ? (S.masterVolume as number) : 0;
   this.master.gain.setTargetAtTime(master, now, smooth);
-  this.buses.ambience.gain.setTargetAtTime(/** @type {number} */(S.ambienceVolume), now, smooth);
-  this.buses.music.gain.setTargetAtTime(/** @type {number} */(S.musicVolume), now, smooth);
-  this.buses.sfx.gain.setTargetAtTime(/** @type {number} */(S.sfxVolume), now, smooth);
-  this.buses.voice.gain.setTargetAtTime(/** @type {number} */(S.sfxVolume), now, smooth);
+  this.buses.ambience.gain.setTargetAtTime((S.ambienceVolume as number), now, smooth);
+  this.buses.music.gain.setTargetAtTime((S.musicVolume as number), now, smooth);
+  this.buses.sfx.gain.setTargetAtTime((S.sfxVolume as number), now, smooth);
+  this.buses.voice.gain.setTargetAtTime((S.sfxVolume as number), now, smooth);
  }
 
  // ----------------------------------------------------------------- loading
