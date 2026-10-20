@@ -28,7 +28,7 @@
  * are live.
  */
 
-import { S, onChange } from "../core/settings.js";
+import { S, onChange, type SettingKey } from "../core/settings.js";
 import { assetCandidates } from "../core/assets.js";
 import { AUDIO_MANIFEST } from "./manifest.js";
 
@@ -48,7 +48,56 @@ const LOOKAHEAD = 0.6;
  */
 const SOLO_RELEASE = 0.06;
 
-const BUS_NAMES = /** @type {const} */ (["ambience", "music", "sfx", "voice"]);
+const BUS_NAMES = ["ambience", "music", "sfx", "voice"] as const;
+
+/** A mixer bus name — one gain node per name, all wired into `master`. */
+type BusName = (typeof BUS_NAMES)[number];
+
+/** The manifest's own key set, not `string`. */
+type AudioKey = keyof typeof AUDIO_MANIFEST;
+
+/**
+ * The per-field view `play`/`loop` need. Every field is optional on the entry
+ * itself — `minGap`, `exclusive`, `rate`, `loop` each exist only on some rows —
+ * so this is the union of them rather than one row's shape, and the entries are
+ * read through it rather than through the union TS cannot express.
+ */
+type AudioFields = Partial<
+ Record<"url" | "bus" | "gain" | "rate" | "loop" | "trim" | "crossfade" | "minGap" | "exclusive" | "needs", unknown>
+>;
+
+/** Call-site options for `play`/`loop`. */
+type PlayOpts = {
+ gain?: number;
+ rate?: number;
+ delay?: number;
+ bus?: string;
+ minGap?: number;
+ exclusive?: boolean | string;
+};
+
+/** A manifest numeric field — `minGap`, `rate` — or `undefined` if absent. */
+function num(v: unknown): number | undefined {
+ return typeof v === "number" ? v : undefined;
+}
+
+/**
+ * Resolve the `AudioContext` constructor.
+ *
+ * Old Safari exposes Web Audio only as `window.webkitAudioContext`, which
+ * `lib.dom` does not declare. The prefixed name is read through an index
+ * into `unknown` and only accepted when the value is function-shaped, so the
+ * vendor-prefix fallback keeps working without a fabricated object type or a
+ * `Window` augmentation. `undefined` means "no Web Audio at all".
+ */
+function readAudioContextCtor(): typeof AudioContext | undefined {
+ if (window.AudioContext) return window.AudioContext;
+ const w = window as unknown as Record<string, unknown>;
+ const prefixed = w["webkitAudioContext"];
+ return typeof prefixed === "function"
+  ? (prefixed as typeof AudioContext)
+  : undefined;
+}
 
 export class AudioEngine {
  [key: string]: any;
@@ -59,7 +108,7 @@ export class AudioEngine {
   this.master = null;
   /** @type {DynamicsCompressorNode|null} */
   this.limiter = null;
-  /** @type {Record<string, GainNode>} */
+  /** @type {Record<BusName, GainNode>} */
   this.buses = Object.create(null);
 
   /** @type {Map<string, AudioBuffer>} */
@@ -118,7 +167,9 @@ export class AudioEngine {
  _ensureContext() {
   if (this.ctx) return this.ctx;
 
-  const Ctor = window.AudioContext || /** @type {any} */ (window).webkitAudioContext;
+  // Safari ships Web Audio only behind the vendor prefix, which lib.dom does
+  // not declare — see `readAudioContextCtor`.
+  const Ctor = readAudioContextCtor();
   if (!Ctor) {
    console.warn("[audio] Web Audio is unavailable; running silent");
    return null;
@@ -174,9 +225,17 @@ export class AudioEngine {
   return ctx;
  }
 
- /** @param {string} [name] */
- _bus(name: any) {
-  return this.buses[name || "sfx"] || this.buses.sfx;
+ /**
+  * The gain node for a bus, falling back to the sfx bus when the name is not
+  * one of the four — so a manifest row or a call site naming an unknown bus
+  * still lands somewhere audible rather than silencing the sound.
+  * @param {string} [name]
+  * @returns {GainNode}
+  */
+ _bus(name?: string): GainNode {
+  const isBus = (n: string): n is BusName =>
+   (BUS_NAMES as readonly string[]).includes(n);
+  return isBus(name ?? "") ? this.buses[name as BusName] : this.buses.sfx;
  }
 
  /**
@@ -222,7 +281,10 @@ export class AudioEngine {
    return;
   }
 
-  const keys = Object.keys(AUDIO_MANIFEST);
+  // `AUDIO_MANIFEST` is a `Record<string, AudioAsset>`, so `Object.keys` widens
+  // to `string[]`; the cast restores the manifest's own key union and keeps the
+  // lookups below checked rather than implicit-any.
+  const keys = Object.keys(AUDIO_MANIFEST) as AudioKey[];
   // Per-asset completion, so the reported number is the mean of real
   // download fractions rather than a count of finished files.
   const frac = new Float64Array(keys.length);
@@ -235,11 +297,19 @@ export class AudioEngine {
 
   await Promise.all(
    keys.map(async (k, i) => {
-    const def = AUDIO_MANIFEST[k];
+    const def = (AUDIO_MANIFEST as Record<AudioKey, (typeof AUDIO_MANIFEST)[AudioKey & string]>)[k];
     // Belongs to a feature that is switched off: not fetched, not
     // decoded, not waited for. `play` already no-ops on a key with no
     // buffer, so nothing downstream needs to know it is absent.
-    if (def.needs && !S[def.needs]) {
+    //
+    // `needs` is optional and per-asset, so it is read off a value typed
+    // `unknown` (the object union TS cannot express `needs` on). A name absent
+    // from `S` reads as falsy, exactly as the old `!S[def.needs]` did — the
+    // settings key is then only used once it names a real one.
+    const raw: unknown = def && typeof def === "object" && "needs" in def ? def.needs : undefined;
+    const needs: SettingKey | undefined =
+     typeof raw === "string" ? (raw as SettingKey) : undefined;
+    if (needs && !S[needs]) {
      frac[i] = 1;
      report();
      return;
@@ -319,7 +389,7 @@ export class AudioEngine {
    onProgress(1);
   }
 
-  return await /** @type {AudioContext} */ (this.ctx).decodeAudioData(bytes);
+  return await (this.ctx as AudioContext).decodeAudioData(bytes);
  }
 
  // ------------------------------------------------------------------ unlock
@@ -370,16 +440,23 @@ export class AudioEngine {
   *           minGap?: number, exclusive?: boolean|string }} [opts]
   * @returns {AudioBufferSourceNode|null}
   */
- play(key: any, opts: any) {
+ play(key: string, opts?: PlayOpts) {
   if (!this.unlocked || !this.ctx) return null;
-  const def = AUDIO_MANIFEST[key];
+  // An unknown key is a no-op, not an error — every call site is a render
+  // loop — so it is narrowed to the manifest's key union before the lookup,
+  // and an absent entry falls through the `!def` guard below.
+  const entry = key in AUDIO_MANIFEST ? AUDIO_MANIFEST[key as AudioKey] : undefined;
   const buf = this.buffers.get(key);
-  if (!def || !buf) return null;
+  if (!entry || !buf) return null;
+
+  // Every field below is optional on the entry and absent on some rows, so it
+  // is read through the field view rather than off one row's shape.
+  const def = entry as AudioFields;
 
   const ctx = this.ctx;
   const now = ctx.currentTime;
 
-  const gap = opts?.minGap ?? def.minGap ?? 0;
+  const gap = opts?.minGap ?? num(def.minGap) ?? 0;
   if (gap > 0 && now - (this._last[key] ?? -1e9) < gap) return null;
   if (this._voices >= MAX_VOICES) return null;
   this._last[key] = now;
@@ -388,17 +465,19 @@ export class AudioEngine {
   // re-casting a spell cuts its own sound and leaves every other spell's
   // alone.
   const solo = opts?.exclusive ?? def.exclusive;
-  const group = solo === true ? key : solo || "";
+  const group: string = solo === true ? key : (typeof solo === "string" ? solo : "");
   if (group) this._releaseSolo(group, now);
 
   const src = ctx.createBufferSource();
   src.buffer = buf;
-  src.playbackRate.value = (opts?.rate ?? 1) * (def.rate ?? 1);
+  const rate = opts?.rate ?? num(def.rate) ?? 1;
+  src.playbackRate.value = rate;
 
   const g = ctx.createGain();
-  g.gain.value = (opts?.gain ?? 1) * (def.gain ?? 1);
+  const gain = (opts?.gain ?? 1) * (num(def.gain) ?? 1);
+  g.gain.value = gain;
 
-  src.connect(g).connect(this._bus(opts?.bus ?? def.bus));
+  src.connect(g).connect(this._bus(opts?.bus ?? (def.bus as string | undefined)));
 
   this._voices++;
   src.onended = () => {
@@ -447,15 +526,17 @@ export class AudioEngine {
   * @param {{ gain?: number, rate?: number, bus?: string }} [opts]
   * @returns {LoopVoice|null}
   */
- loop(key: any, opts: any) {
-  const def = AUDIO_MANIFEST[key];
+ loop(key: string, opts?: PlayOpts) {
+  const entry = key in AUDIO_MANIFEST ? AUDIO_MANIFEST[key as AudioKey] : undefined;
   const buf = this.buffers.get(key);
-  if (!def || !buf || !this.ctx) return null;
+  if (!entry || !buf || !this.ctx) return null;
+  // `loop` is declared on the rows that declare it and read as optional.
+  const def = entry as AudioFields;
   if (!def.loop) {
    console.warn("[audio] '" + key + "' is not declared as a loop");
    return null;
   }
-  const voice = new LoopVoice(this, key, def, buf, opts);
+  const voice = new LoopVoice(this, key, entry, buf, opts);
   this._loops.push(voice);
   return voice;
  }
