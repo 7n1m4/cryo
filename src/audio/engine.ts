@@ -100,57 +100,51 @@ function readAudioContextCtor(): typeof AudioContext | undefined {
 }
 
 export class AudioEngine {
- [key: string]: any;
- constructor() {
-  /** @type {AudioContext|null} */
-  this.ctx = null;
-  /** @type {GainNode|null} */
-  this.master = null;
-  /** @type {DynamicsCompressorNode|null} */
-  this.limiter = null;
-  /** @type {Record<BusName, GainNode>} */
-  this.buses = Object.create(null);
+ /** The context, once `_ensureContext` has built it. Null until then. */
+ ctx: AudioContext | null = null;
+ /** Master bus gain — the `S.masterVolume` fader. */
+ master: GainNode | null = null;
+ /** Limiter across the whole mix, after `master`. */
+ limiter: DynamicsCompressorNode | null = null;
+ /** One gain per bus name, all wired into `master`. */
+ buses: Record<BusName, GainNode> = Object.create(null) as Record<BusName, GainNode>;
+ /** Decoded audio per manifest key. */
+ buffers: Map<string, AudioBuffer> = new Map();
 
-  /** @type {Map<string, AudioBuffer>} */
-  this.buffers = new Map();
+ /**
+  * Keys whose fetch/decode threw. The load loop is deliberately non-fatal:
+  * one asset missing is not a reason to drop the other forty, so `load()`
+  * still resolves and `buffers` simply keeps that key absent. Recording it
+  * here is what makes that policy auditable — `failed.has(k)` now tells a
+  * caller "this asset was attempted and threw" apart from "never attempted",
+  * where both used to read as an absent key in `buffers`.
+  */
+ failed: Set<string> = new Set();
 
-  /**
-   * Keys whose fetch/decode threw. The load loop is deliberately non-fatal:
-   * one asset missing is not a reason to drop the other forty, so `load()`
-   * still resolves and `buffers` simply keeps that key absent. Recording it
-   * here is what makes that policy auditable — `failed.has(k)` now tells a
-   * caller "this asset was attempted and threw" apart from "never attempted",
-   * where both used to read as an absent key in `buffers`.
-   * @type {Set<string>}
-   */
-  this.failed = new Set();
+ /** True once every manifest entry has been fetched and decoded (or failed). */
+ loaded = false;
+ /** True once a user gesture has resumed the context. */
+ unlocked = false;
+ /**
+  * The rejection from the last refused `ctx.resume()`, or null. The return
+  * value of `unlock()` stays the boolean callers branch on; this keeps the
+  * reason it came back false.
+  */
+ lastResumeError: unknown = null;
 
-  /** True once every manifest entry has been fetched and decoded (or failed). */
-  this.loaded = false;
-  /** True once a user gesture has resumed the context. */
-  this.unlocked = false;
-  /**
-   * The rejection from the last refused `ctx.resume()`, or null. The return
-   * value of `unlock()` stays the boolean callers branch on; this keeps the
-   * reason it came back false.
-   * @type {unknown}
-   */
-  this.lastResumeError = null;
+ /** Live loop voices, for `stopAll`. */
+ _loops: LoopVoice[] = [];
+ /** Live one-shot count, for the voice cap. */
+ _voices = 0;
+ /** Context time of the last start, per key, for `minGap`. */
+ _last: Record<string, number> = Object.create(null) as Record<string, number>;
+ /**
+  * Live voice per exclusive group — see the `exclusive` manifest field.
+  */
+ _solo: Record<string, { src: AudioBufferSourceNode; gain: GainNode }> =
+  Object.create(null) as Record<string, { src: AudioBufferSourceNode; gain: GainNode }>;
 
-  /** @type {LoopVoice[]} */
-  this._loops = [];
-  /** Live one-shot count, for the voice cap. */
-  this._voices = 0;
-  /** Context time of the last start, per key, for `minGap`. */
-  this._last = Object.create(null);
-  /**
-   * Live voice per exclusive group — see the `exclusive` manifest field.
-   * @type {Record<string, {src: AudioBufferSourceNode, gain: GainNode}>}
-   */
-  this._solo = Object.create(null);
-
-  this._boundSettings = false;
- }
+ _boundSettings = false;
 
  /** Whether anything actually decoded — false means offer no sound at all. */
  get hasAssets() {
@@ -317,10 +311,13 @@ export class AudioEngine {
     try {
      // Decode is the last 15%: it is real work, but it is not
      // measurable in progress, so it gets a flat reservation.
-     const buf = await this._fetchDecode(def.url, (p: any) => {
-      frac[i] = p * 0.85;
-      report();
-     });
+     const buf = await this._fetchDecode(
+      def.url as string,
+      (p: number) => {
+       frac[i] = p * 0.85;
+       report();
+      }
+     );
      this.buffers.set(k, buf);
     } catch (err: unknown) {
      // Deliberately non-fatal: one missing asset must not take the other
@@ -343,7 +340,7 @@ export class AudioEngine {
   * @param {(p: number) => void} onProgress
   * @returns {Promise<AudioBuffer>}
   */
- async _fetchDecode(path: any, onProgress: any) {
+ async _fetchDecode(path: string, onProgress: (p: number) => void) {
   // The store first, this origin second. A sound that has been committed
   // but not yet uploaded still plays. See `core/assets.js`.
   let res = null;
@@ -502,7 +499,7 @@ export class AudioEngine {
   * @param {string} group
   * @param {number} now context time
   */
- _releaseSolo(group: any, now: any) {
+ _releaseSolo(group: string, now: number) {
   const live = this._solo[group];
   if (!live) return;
   delete this._solo[group];
@@ -564,46 +561,65 @@ export class AudioEngine {
  *    seventeen seconds.
  */
 export class LoopVoice {
- [key: string]: any;
+ /** The owning engine, for its buses and context. */
+ engine: AudioEngine;
+ /** Manifest key this voice plays. */
+ key: string;
+ /** The decoded buffer. */
+ buf: AudioBuffer;
+ /** Unity gain for this asset, before `opts.gain`. */
+ unity: number;
+ /** Base playback rate: `opts.rate` times the asset's own. */
+ rate: number;
+ /** Seconds shaved off both ends of the buffer. */
+ trim: number;
+ /** Seconds of overlap between scheduled segments; 0 selects native mode. */
+ crossfade: number;
+ /** Playable seconds between the trims. */
+ segment: number;
+ /** This voice's own output gain, ahead of the bus. */
+ gainNode!: GainNode;
+ /** native mode's single source */
+ _src: AudioBufferSourceNode | null = null;
+ /** Context time the next overlap segment should start at. */
+ _nextAt = 0;
+ /** True until the first overlap segment is queued; see `_spawn`. */
+ _first = false;
+ /** overlap-mode scheduler handle */
+ _timer = 0;
+ /** True while scheduled; `start`/`stop` flip it. */
+ running = false;
+
  /**
   * @param {AudioEngine} engine
   * @param {string} key
-  * @param {import("./manifest.js").AudioAsset} def
+  * @param {AudioFields} def
   * @param {AudioBuffer} buf
   * @param {{ gain?: number, rate?: number, bus?: string }} [opts]
   */
- constructor(engine: any, key: any, def: any, buf: any, opts: any) {
+ constructor(engine: AudioEngine, key: string, def: AudioFields, buf: AudioBuffer, opts?: PlayOpts) {
   this.engine = engine;
   this.key = key;
   this.buf = buf;
-  this.unity = def.gain ?? 1;
-  this.rate = (opts?.rate ?? 1) * (def.rate ?? 1);
-  this.trim = def.trim ?? 0;
-  this.crossfade = def.crossfade ?? 0;
-  /** Playable seconds between the trims. */
+  this.unity = num(def.gain) ?? 1;
+  this.rate = (opts?.rate ?? 1) * (num(def.rate) ?? 1);
+  this.trim = num(def.trim) ?? 0;
+  this.crossfade = num(def.crossfade) ?? 0;
   this.segment = Math.max(0.05, buf.duration - this.trim * 2);
   if (this.crossfade > this.segment * 0.45) this.crossfade = this.segment * 0.45;
 
-  const ctx = /** @type {AudioContext} */ (engine.ctx);
+  const ctx = engine.ctx;
+  if (!ctx) return;
   this.gainNode = ctx.createGain();
   this.gainNode.gain.value = (opts?.gain ?? 0) * this.unity;
-  this.gainNode.connect(engine._bus(opts?.bus ?? def.bus));
-
-  /** @type {AudioBufferSourceNode|null} native mode's single source */
-  this._src = null;
-  /** Context time the next overlap segment should start at. */
-  this._nextAt = 0;
-  /** True until the first overlap segment is queued; see `_spawn`. */
-  this._first = false;
-  /** @type {number} overlap-mode scheduler handle */
-  this._timer = 0;
-  this.running = false;
+  this.gainNode.connect(engine._bus(opts?.bus ?? (def.bus as string | undefined)));
  }
 
  /** Begin playback. Idempotent. */
  start() {
   if (this.running || !this.engine.unlocked) return;
-  const ctx = /** @type {AudioContext} */ (this.engine.ctx);
+  const ctx = this.engine.ctx;
+  if (!ctx) return;
   this.running = true;
 
   if (this.crossfade > 0) {
@@ -636,7 +652,8 @@ export class LoopVoice {
  /** Queue overlap segments up to the look-ahead horizon. */
  _pump() {
   if (!this.running) return;
-  const ctx = /** @type {AudioContext} */ (this.engine.ctx);
+  const ctx = this.engine.ctx;
+  if (!ctx) return;
   // A suspended context's clock is frozen, so this loop simply does not
   // fire — which is exactly the behaviour a hidden tab wants.
   let guard = 8;
@@ -646,8 +663,9 @@ export class LoopVoice {
  }
 
  /** @param {number} at context time */
- _spawn(at: any) {
-  const ctx = /** @type {AudioContext} */ (this.engine.ctx);
+ _spawn(at: number) {
+  const ctx = this.engine.ctx;
+  if (!ctx) return;
   const xf = this.crossfade;
   const seg = this.segment;
 
@@ -689,9 +707,10 @@ export class LoopVoice {
   * @param {number} to 0..1 of the asset's unity gain
   * @param {number} [smooth] time constant, seconds
   */
- set(to: any, smooth = 0.09) {
+ set(to: number, smooth = 0.09) {
   if (!this.running) return;
-  const ctx = /** @type {AudioContext} */ (this.engine.ctx);
+  const ctx = this.engine.ctx;
+  if (!ctx) return;
   this.gainNode.gain.setTargetAtTime(to * this.unity, ctx.currentTime, smooth);
  }
 
@@ -701,9 +720,10 @@ export class LoopVoice {
   * @param {number} to 0..1 of the asset's unity gain
   * @param {number} seconds
   */
- fade(to: any, seconds: any) {
+ fade(to: number, seconds: number) {
   if (!this.running) return;
-  const ctx = /** @type {AudioContext} */ (this.engine.ctx);
+  const ctx = this.engine.ctx;
+  if (!ctx) return;
   const now = ctx.currentTime;
   const p = this.gainNode.gain;
   p.cancelScheduledValues(now);
@@ -716,10 +736,11 @@ export class LoopVoice {
   * so changing the rate under it would walk the joins out of alignment.
   * @param {number} r
   */
- setRate(r: any) {
+ setRate(r: number) {
   this.rate = r;
   if (!this._src) return;
-  const ctx = /** @type {AudioContext} */ (this.engine.ctx);
+  const ctx = this.engine.ctx;
+  if (!ctx) return;
   this._src.playbackRate.setTargetAtTime(r, ctx.currentTime, 0.08);
  }
 
@@ -733,9 +754,9 @@ export class LoopVoice {
    clearInterval(this._timer);
    this._timer = 0;
   }
-  const ctx = /** @type {AudioContext} */ (this.engine.ctx);
+  const ctx = this.engine.ctx;
   const src = this._src;
-  if (src) {
+  if (src && ctx) {
    src.stop(ctx.currentTime + fadeSeconds + 0.02);
    this._src = null;
   }
